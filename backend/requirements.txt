@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+ffmpeg-python
+scenedetect
+opencv-python-headless
+librosa
+soundfile
+torch
+torchaudio
+demucs
+pydub
+requests
+google-generativeai
+python-dotenv
