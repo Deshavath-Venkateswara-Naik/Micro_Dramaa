@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from routers import ingestion, segmentation, audio, speech, face, emotion, bgm, narrative, virality, nostalgia, drama, sequencer, renderer
+from routers import ingestion, segmentation, audio, speech, face, emotion, bgm, narrative, virality, nostalgia, drama, sequencer, renderer, continuous
 import uvicorn
 import os
 import logging
@@ -23,6 +23,7 @@ app.include_router(nostalgia.router, prefix="/api/v1")
 app.include_router(drama.router, prefix="/api/v1")
 app.include_router(sequencer.router, prefix="/api/v1")
 app.include_router(renderer.router, prefix="/api/v1")
+app.include_router(continuous.router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():

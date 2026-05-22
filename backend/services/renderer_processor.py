@@ -26,8 +26,95 @@ class SmartClipRenderer:
         scenes = metadata.get("scenes", [])
         render_results = []
         
-        # We only render the top viral scene to save time/resources, or the first scene
-        # In a full system, you would loop through scenes. For demonstration, we'll take the first scene.
+        # Check for Stage 14 Continuous Roadmap
+        roadmap_path = self.output_base_dir / "continuous" / "continuous_micro_drama_roadmap.json"
+        roadmap = self._read_json(roadmap_path) if roadmap_path.exists() else {}
+        episodes = roadmap.get("episodes", [])
+        
+        video_path = self.output_base_dir / "standardized_video.mp4"
+        if not video_path.exists():
+            logger.error(f"Standardized video missing: {video_path}")
+            return []
+            
+        if episodes:
+            logger.info("Continuous Episodic Roadmap found. Rendering Continuous Episodes.")
+            scene_dict = {s["scene_id"]: s for s in scenes}
+            
+            # Render all episodes
+            for ep in episodes:
+                ep_num = ep.get("episode_number", 1)
+                scenes_inc = ep.get("scenes_included", [])
+                
+                if not scenes_inc:
+                    continue
+                    
+                first_scene = scene_dict.get(scenes_inc[0])
+                last_scene = scene_dict.get(scenes_inc[-1])
+                
+                if not first_scene or not last_scene:
+                    continue
+                    
+                # Time string format is "00:00:00" or similar, need to convert to seconds or use MoviePy parsing
+                # MoviePy can accept "00:00:00" format!
+                clip_start = first_scene.get("start", "00:00:00")
+                clip_end = last_scene.get("end", "00:01:00")
+                
+                # Attempt to parse specific timestamps from trim_instructions
+                trim_inst = ep.get("trim_instructions", "")
+                times = re.findall(r'\d{2}:\d{2}:\d{2}', trim_inst)
+                if len(times) >= 1:
+                    clip_start = times[0]
+                    # If a second timestamp exists, use it as end, else assume a 60s clip
+                    if len(times) >= 2:
+                        clip_end = times[1]
+                    else:
+                        # Convert clip_start to seconds and add 60
+                        parts = clip_start.split(':')
+                        s_seconds = int(parts[0])*3600 + int(parts[1])*60 + int(parts[2])
+                        e_seconds = s_seconds + 60
+                        clip_end = f"{e_seconds//3600:02d}:{(e_seconds%3600)//60:02d}:{e_seconds%60:02d}"
+                
+                out_file = self.render_dir / f"continuous_episode_{ep_num}.mp4"
+                
+                try:
+                    logger.info(f"Loading video and extracting Episode {ep_num} from {clip_start} to {clip_end}")
+                    clip = VideoFileClip(str(video_path)).subclip(clip_start, clip_end)
+                    
+                    # 1. Sound Boost
+                    clip = clip.volumex(1.5)
+                    
+                    # Normal format requested (16:9), no cropping to 9:16
+                    logger.info("Keeping original video aspect ratio")
+                    
+                    # Render the final file
+                    logger.info(f"Rendering final episodic reel to {out_file}...")
+                    clip.write_videofile(
+                        str(out_file), 
+                        codec="libx264", 
+                        audio_codec="aac", 
+                        threads=4, 
+                        preset="ultrafast",
+                        logger=None
+                    )
+                    
+                    clip.close()
+                    
+                    render_results.append({
+                        "episode_number": ep_num,
+                        "rendered_path": str(out_file),
+                        "status": "success"
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Failed to render episode {ep_num}: {e}")
+                    render_results.append({
+                        "episode_number": ep_num,
+                        "error": str(e),
+                        "status": "failed"
+                    })
+            return render_results
+
+        # Fallback to single scene rendering if no episodes
         if not scenes:
             return []
             
