@@ -34,7 +34,7 @@ async def process_emotion(request: EmotionRequest):
     
     try:
         processor = EmotionIntelligenceProcessor(str(output_base_dir))
-        results = processor.process_emotion(request.video_id, request.scene_metadata_path)
+        results = processor.process_emotion(request.video_path, request.scene_metadata_path)
         
         return {
             "status": "completed",

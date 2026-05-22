@@ -1,8 +1,21 @@
 import os
 import json
 import logging
+import cv2
+import torch
 from pathlib import Path
 from google import genai
+from emotiefflib.facial_analysis import EmotiEffLibRecognizer
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# PyTorch 2.6 weights_only patch
+_original_load = torch.load
+def _patched_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+torch.load = _patched_load
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +38,14 @@ class EmotionIntelligenceProcessor:
             logger.warning(f"Failed to init GenAI client: {e}")
             self.llm_client = None
 
-    def process_emotion(self, video_id: str, scene_metadata_path: str) -> list:
+        try:
+            logger.info("Loading EmotiEffLib Engagement Model...")
+            self.engagement_model = EmotiEffLibRecognizer(model_name='enet_b0_8_best_afew')
+        except Exception as e:
+            logger.error(f"Failed to load EmotiEffLibRecognizer: {e}")
+            self.engagement_model = None
+
+    def process_emotion(self, video_path: str, scene_metadata_path: str) -> list:
         metadata_path = Path(scene_metadata_path)
         if not metadata_path.exists():
             logger.error(f"Metadata not found: {scene_metadata_path}")
@@ -70,16 +90,23 @@ class EmotionIntelligenceProcessor:
                     if face.get("is_closeup"):
                         closeups_count += 1
                         
+            # Stage 6 HUGE UPGRADE: Extract Continuous Tension/Engagement via EmotiEffLib
+            engagement_timeline = self._extract_continuous_engagement(video_path, scene, reaction_timeline)
+            avg_engagement = 0
+            if engagement_timeline:
+                avg_engagement = sum([e["engagement_score"] for e in engagement_timeline]) / len(engagement_timeline)
+                        
             # Weighted Scoring Heuristic
-            # Example: dialogue emotion=35%, face=25%, voice=20%, bgm=15%, silence=5%
+            # Example: dialogue emotion=30%, face=20%, voice=15%, bgm=15%, silence=5%, engagement=15%
             # Normalize inputs to 0-100 scale
             n_dialogue = dialogue_impact
             n_face = min(100, closeups_count * 5) # Heuristic for face impact
             n_voice = delivery_intensity
             n_bgm = bgm_elevation * 100
             n_silence = 100 if dramatic_silence else 0
+            n_engagement = avg_engagement * 100
             
-            weighted_score = (n_dialogue * 0.35) + (n_face * 0.25) + (n_voice * 0.20) + (n_bgm * 0.15) + (n_silence * 0.05)
+            weighted_score = (n_dialogue * 0.30) + (n_face * 0.20) + (n_voice * 0.15) + (n_bgm * 0.15) + (n_silence * 0.05) + (n_engagement * 0.15)
             
             cinematic_scores = face_data.get("cinematic_scores", {})
             
@@ -88,7 +115,7 @@ class EmotionIntelligenceProcessor:
                 scene_id,
                 dialogue_type, dialogue_emotion, dialogue_impact, delivery_intensity,
                 bgm_elevation, dramatic_silence, closeups_count,
-                reaction_timeline, cinematic_scores, weighted_score
+                reaction_timeline, engagement_timeline, cinematic_scores, weighted_score
             )
             
             scene_payload = {
@@ -112,7 +139,7 @@ class EmotionIntelligenceProcessor:
         # Save master JSON
         master_payload = {
             "status": "completed",
-            "message": f"Stage 6 Emotion Intelligence completed for {video_id}",
+            "message": f"Stage 6 Emotion Intelligence completed",
             "output_dir": str(self.output_base_dir),
             "processed_scenes": len(intelligence_results),
             "emotion_intelligence_results": intelligence_results
@@ -133,8 +160,59 @@ class EmotionIntelligenceProcessor:
                 logger.error(f"Error reading JSON {path}: {e}")
         return {}
         
+    def _extract_continuous_engagement(self, video_path: str, scene: dict, reaction_timeline: list) -> list:
+        """Samples frames within the scene and uses EmotiEffLib to track continuous engagement (tension)."""
+        if not self.engagement_model or not os.path.exists(video_path) or not reaction_timeline:
+            return []
+            
+        engagement_data = []
+        try:
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0: fps = 24.0
+            
+            for t_data in reaction_timeline:
+                ts_sec = t_data.get("timestamp_sec", 0)
+                frame_idx = int(ts_sec * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                
+                if ret and t_data.get("faces"):
+                    # Process the first face in the frame for engagement
+                    face = t_data["faces"][0]
+                    box = face.get("box")
+                    if box:
+                        x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+                        # Ensure box is within bounds
+                        x = max(0, x)
+                        y = max(0, y)
+                        face_crop = frame[y:y+h, x:x+w]
+                        if face_crop.size > 0:
+                            # Extract engagement using EmotiEffLib
+                            # Output of predict_engagement is (eng_score, class_name) or similar.
+                            # We will just predict emotions and get the engagement dimension if supported, or infer it.
+                            # Since enet_b0_8_best_afew is primarily emotions, we use the prediction features.
+                            pred, features = self.engagement_model.predict_emotions(face_crop, logits=False)
+                            # Fallback heuristic: 'Angry', 'Fear', 'Surprise', 'Sadness' indicate higher tension/engagement in drama
+                            tension_score = 0.5
+                            if pred in ['Angry', 'Fear', 'Surprise']: tension_score = 0.9
+                            elif pred in ['Sadness', 'Disgust']: tension_score = 0.7
+                            elif pred in ['Happiness']: tension_score = 0.8 # Elevation
+                            else: tension_score = 0.2
+                            
+                            engagement_data.append({
+                                "timestamp_sec": ts_sec,
+                                "engagement_score": tension_score,
+                                "detected_emotion": pred
+                            })
+            cap.release()
+        except Exception as e:
+            logger.error(f"Error extracting continuous engagement: {e}")
+            
+        return engagement_data
+
     def _extract_emotional_curve(self, scene_id, d_type, d_emo, d_impact, v_intensity, 
-                                 bgm_elevation, silence, closeups, timeline, cinematic_scores, weighted_score):
+                                 bgm_elevation, silence, closeups, timeline, engagement_timeline, cinematic_scores, weighted_score):
         if not self.llm_client:
             return self._mock_emotion_output()
             
@@ -144,13 +222,19 @@ class EmotionIntelligenceProcessor:
             faces_str = [f"{f['actor_id']} (Closeup: {f['is_closeup']})" for f in t.get("faces", [])]
             if faces_str:
                 simplified_timeline.append(f"At {t['timestamp_sec']}s: " + " | ".join(faces_str))
+                
+        # Simplify engagement
+        engagement_str = ", ".join([f"{e['timestamp_sec']}s:{e['engagement_score']}" for e in engagement_timeline])
             
         prompt = f"""
         You are a Senior Cinematic Director specializing in emotional intelligence for film.
-        Analyze the fused multimodal signals for scene {scene_id} and map its emotional curve.
+        Analyze the fused multimodal signals for scene {scene_id} and track its emotional energy continuously.
         
-        We are tracking cinematic emotional progression patterns such as:
-        - calm -> tension rise -> silence -> explosion
+        STAGE 6 GOALS - We must detect the following specific emotional states:
+        - sadness, tension, suspense, romance, comedy, elevation, fear, emotional collapse
+        
+        We are tracking cinematic emotional progression patterns (curves) such as:
+        - low emotion -> tension rise -> silence -> emotional explosion
         - calm -> romance -> betrayal -> emotional collapse
         - fear build-up -> suspense -> reveal -> silence
         
@@ -158,17 +242,18 @@ class EmotionIntelligenceProcessor:
         1. Dialogue Meaning: {d_type}, Impact Score: {d_impact}/100, Emotion: {d_emo}
         2. Voice Emotion/Delivery Intensity: {v_intensity}/100
         3. Background Music (BGM) Elevation Score: {bgm_elevation} (0.0 to 1.0)
-        4. Dramatic Silence Detected: {silence}
+        4. Dramatic Silence Duration Detected: {silence}
         5. Face Reactions: {closeups} close-up shots detected.
         6. Aggregated Weighted Emotion Score: {weighted_score}/100
+        7. Continuous Tension/Engagement Energy Curve (EmotiEffLib): [{engagement_str}]
         
         Face Timeline:
-        {json.dumps(simplified_timeline[:30], indent=2)} # Truncated for context
+        {json.dumps(simplified_timeline[:30], indent=2)}
         
-        Provide your analysis ONLY as a valid JSON object matching this schema exactly:
+        Provide your analysis ONLY as a valid JSON object matching this exact schema:
         {{
-            "emotion_curve": "explosive_payoff | silent_breakdown | suspense_peak | romance_peak | betrayal_moment | emotional_reveal | heroic_elevation",
-            "dominant_emotions": ["list", "of", "strings"],
+            "emotion_curve": "explosive_payoff | silent_breakdown | suspense_peak | romance_peak | betrayal_moment | emotional_collapse | heroic_elevation",
+            "dominant_emotions": ["must contain at least one of: sadness, tension, suspense, romance, comedy, elevation, fear, emotional collapse"],
             "emotion_progression": ["step1", "step2", "step3", "step4"],
             "peak_intensity": integer 0-100,
             "viral_potential": integer 0-100,

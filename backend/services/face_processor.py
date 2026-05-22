@@ -7,6 +7,7 @@ import numpy as np
 from insightface.app import FaceAnalysis
 from scipy.spatial.distance import cosine
 from google import genai
+from hsemotion.facial_emotions import HSEmotionRecognizer
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,19 @@ class FaceIntelligenceProcessor:
         logger.info("Initializing InsightFace model...")
         self.face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']) # Use CPU by default unless CUDA is explicitly configured
         self.face_app.prepare(ctx_id=0, det_size=(640, 640))
+        
+        # Initialize HSEmotion model
+        logger.info("Initializing HSEmotion model...")
+        import torch
+        original_load = torch.load
+        def patched_load(*args, **kwargs):
+            kwargs['weights_only'] = False
+            return original_load(*args, **kwargs)
+        torch.load = patched_load
+        
+        self.emotion_recognizer = HSEmotionRecognizer(model_name='enet_b0_8_best_afew', device='cpu')
+        
+        torch.load = original_load
         
         # Initialize Actor Cache
         self.actor_cache = {}
@@ -155,8 +169,22 @@ class FaceIntelligenceProcessor:
                         
                     current_frame_tracker[actor_id] = box
                     
-                    # Mock emotion (insightface does not provide this by default)
-                    emotion = "neutral"
+                    # Emotion recognition using HSEmotion
+                    try:
+                        x1 = max(0, int(box[0]))
+                        y1 = max(0, int(box[1]))
+                        x2 = min(frame.shape[1], int(box[2]))
+                        y2 = min(frame.shape[0], int(box[3]))
+                        
+                        if (y2 > y1) and (x2 > x1):
+                            face_img = frame[y1:y2, x1:x2]
+                            face_img_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+                            emotion, scores = self.emotion_recognizer.predict_emotions(face_img_rgb, logits=False)
+                        else:
+                            emotion = "neutral"
+                    except Exception as e:
+                        logger.warning(f"HSEmotion failed: {e}")
+                        emotion = "neutral"
                     
                     box_dict = {
                         "x": int(box[0]),

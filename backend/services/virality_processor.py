@@ -67,25 +67,16 @@ class ViralityIntelligenceProcessor:
             llm_response = self._extract_virality_logic(scene_id, scene_context)
             
             scene_payload = {
-                "scene_id": scene_id,
-                "status": "completed",
-                "viral_probability": llm_response.get("viral_probability", int(base_virality_score)),
-                "replay_probability": llm_response.get("replay_probability", 0),
-                "retention_strength": llm_response.get("retention_strength", 0),
-                "hook_strength": llm_response.get("hook_strength", 0),
-                "shareability": llm_response.get("shareability", 0),
-                "meme_potential": llm_response.get("meme_potential", 0),
-                "audience_emotion": llm_response.get("audience_emotion", "unknown"),
-                "viral_reasons": llm_response.get("viral_reasons", []),
-                "audience_psychology": llm_response.get("audience_psychology", {}),
-                "platform_fit": llm_response.get("platform_fit", [])
+                "viral_probability": llm_response.get("viral_probability", int(base_virality_score))
             }
             
             out_path = self.virality_dir / f"virality_intelligence_{scene_id}.json"
             with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(scene_payload, f, indent=4, ensure_ascii=False)
                 
-            intelligence_results.append(scene_payload)
+            scene_payload_for_master = scene_payload.copy()
+            scene_payload_for_master["scene_id"] = scene_id
+            intelligence_results.append(scene_payload_for_master)
 
         # Rank scenes by viral probability for the master file
         ranked_scenes = sorted(intelligence_results, key=lambda x: x["viral_probability"], reverse=True)
@@ -119,8 +110,9 @@ class ViralityIntelligenceProcessor:
             return self._mock_virality_output()
             
         prompt = f"""
-        You are the Core Audience Psychology & Virality Engine (Expert Social Media Strategist).
-        Analyze the cinematic cues of Scene {scene_id} to predict its viral performance on platforms like Instagram Reels and YouTube Shorts.
+        You are the Core Audience Psychology & Virality Engine.
+        You have been trained on viral Telugu reels, YouTube Shorts, Instagram edits, fan edits, and mass movie clips.
+        Analyze the cinematic cues of Scene {scene_id} to predict its reel performance.
         
         --- CINEMATIC CUES ---
         Emotion Curve: {context['emotion_curve']} (Emotions: {context['dominant_emotions']})
@@ -129,28 +121,26 @@ class ViralityIntelligenceProcessor:
         Character Dynamics: {context['character_dynamics']}
         Base Algorithmic Score: {context['base_score']}/100
         
+        STAGE 9 GOALS - AI Must Predict:
+        1. replay probability
+        2. retention
+        3. emotional engagement
+        4. meme potential
+        5. shareability
+        6. hook strength
+        
         INSTRUCTIONS:
-        1. Predict WHY audiences would replay this scene or share it (e.g. dopamine trigger from hero elevation, relatable meme face).
-        2. Assign scores for replay probability, hook strength, and meme potential.
-        3. Identify the core audience emotion (e.g. mass_elevation, suspense_retention, goosebumps_moment).
-        4. Recommend the best platform fit.
+        Reason through how this scene fits the mass reel algorithm (e.g. dopamine trigger from hero elevation, relatable meme face, mass BGM drop). Assign a score to each specific target metric, and finally combine them into a single 'viral_probability' score.
         
         Provide your analysis ONLY as a valid JSON object matching this exact schema:
         {{
-            "viral_probability": integer 0-100 (use the base algorithmic score as a starting point, adjust based on your analysis),
             "replay_probability": integer 0-100,
-            "retention_strength": integer 0-100,
-            "hook_strength": integer 0-100,
-            "shareability": integer 0-100,
+            "retention": integer 0-100,
+            "emotional_engagement": integer 0-100,
             "meme_potential": integer 0-100,
-            "audience_emotion": "mass_elevation | emotional_hook | suspense_retention | meme_reaction | goosebumps_moment | emotional_payoff | fan_edit_gold | viral_dialogue",
-            "viral_reasons": ["reason 1", "reason 2"],
-            "audience_psychology": {{
-                "dopamine_trigger": "high | medium | low",
-                "curiosity_retention": "strong | moderate | weak",
-                "emotional_payoff": "excellent | good | fair"
-            }},
-            "platform_fit": ["Instagram Reels", "YouTube Shorts", "TikTok"]
+            "shareability": integer 0-100,
+            "hook_strength": integer 0-100,
+            "viral_probability": integer 0-100
         }}
         """
         
@@ -173,18 +163,11 @@ class ViralityIntelligenceProcessor:
 
     def _mock_virality_output(self):
         return {
-            "viral_probability": 85,
             "replay_probability": 88,
-            "retention_strength": 90,
-            "hook_strength": 92,
-            "shareability": 80,
+            "retention": 90,
+            "emotional_engagement": 95,
             "meme_potential": 65,
-            "audience_emotion": "mass_elevation",
-            "viral_reasons": ["strong hero presence", "suspense payoff"],
-            "audience_psychology": {
-                "dopamine_trigger": "high",
-                "curiosity_retention": "strong",
-                "emotional_payoff": "excellent"
-            },
-            "platform_fit": ["Instagram Reels", "YouTube Shorts"]
+            "shareability": 80,
+            "hook_strength": 92,
+            "viral_probability": 85
         }

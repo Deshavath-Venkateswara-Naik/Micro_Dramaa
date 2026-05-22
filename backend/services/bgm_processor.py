@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 import numpy as np
 import librosa
+import essentia.standard as es
 from google import genai
 
 logger = logging.getLogger(__name__)
@@ -62,16 +63,14 @@ class BgmIntelligenceProcessor:
                 scene_id, music_features, emotion_data
             )
             
+            if isinstance(music_output, list) and len(music_output) > 0:
+                music_output = music_output[0]
+            elif not isinstance(music_output, dict):
+                music_output = {}
+            
             scene_payload = {
-                "scene_id": scene_id,
-                "status": "completed",
                 "bgm_type": music_output.get("bgm_type", "unknown"),
-                "intensity": music_output.get("intensity", 0),
-                "music_progression": music_output.get("music_progression", []),
-                "cinematic_impact": music_output.get("cinematic_impact", "low"),
-                "music_emotion": music_output.get("music_emotion", "neutral"),
-                "peak_timestamp": music_output.get("peak_timestamp", 0.0),
-                "viral_music_potential": music_output.get("viral_music_potential", 0)
+                "intensity": music_output.get("intensity", 0)
             }
             
             out_path = self.music_dir / f"bgm_intelligence_{scene_id}.json"
@@ -121,13 +120,23 @@ class BgmIntelligenceProcessor:
             peak_idx = np.argmax(rms)
             peak_time = round(float(librosa.frames_to_time(peak_idx, sr=sr)), 2)
             
-            # Tempo & Beats
-            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-            tempo_val = float(tempo[0]) if isinstance(tempo, np.ndarray) else float(tempo)
+            # Essentia Processing
+            try:
+                audio_es = es.MonoLoader(filename=audio_path, sampleRate=22050)()
+                dyn_comp, loudness = es.DynamicComplexity()(audio_es)
+                rhythm_extractor = es.RhythmExtractor2013(method='multifeature')
+                bpm, _, _, _, _ = rhythm_extractor(audio_es)
+            except Exception as e:
+                logger.error(f"Essentia failed: {e}")
+                dyn_comp, loudness, bpm = 0, 0, 0
+
+            # Spectral Centroid (High = Violins/Vocals, Low = Drums/Bass)
+            centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+            avg_centroid = round(float(np.mean(centroid)), 2)
             
-            # Spectral Contrast (High value indicates prominent bright instruments, low means bass/drums)
-            spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
-            avg_contrast = round(float(np.mean(spectral_contrast)), 2)
+            # Onset Strength for Beat Drops
+            onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+            peak_onset = round(float(np.max(onset_env)), 2)
             
             # Silence
             silence_thresh = 0.01
@@ -136,8 +145,10 @@ class BgmIntelligenceProcessor:
             return {
                 "energy_progression": energy_progression,
                 "peak_energy_time": peak_time,
-                "tempo": round(tempo_val, 2),
-                "spectral_contrast": avg_contrast,
+                "tempo": round(float(bpm), 2),
+                "spectral_centroid": avg_centroid,
+                "dynamic_complexity": round(float(dyn_comp), 2),
+                "peak_onset_strength": peak_onset,
                 "silence_ratio": silence_ratio
             }
         except Exception as e:
@@ -150,34 +161,47 @@ class BgmIntelligenceProcessor:
             
         # Context from Stage 6
         scene_emotion_curve = emotion_data.get("emotion_curve", "unknown")
-        scene_dominant_emotions = emotion_data.get("dominant_emotions", [])
+        emotion_peak_time = emotion_data.get("peak_timestamp", 0.0)
+        
+        # BGM Emotion Mapping
+        music_peak_time = music_features.get('peak_energy_time', 0.0)
+        sync_delta = abs(music_peak_time - emotion_peak_time)
+        if emotion_peak_time > 0 and sync_delta <= 2.0:
+            bgm_emotion_mapping = f"PERFECT SYNC ({sync_delta}s diff): Music rise directly hits the emotional peak!"
+        else:
+            bgm_emotion_mapping = f"ASYNC ({sync_delta}s diff): Music peaks independently or there is no clear peak."
         
         prompt = f"""
         You are a Senior Cinematic Music Director and Composer.
-        Analyze the numerical audio features from the background music (BGM) of scene {scene_id} and the detected overall emotion of the scene to classify the cinematic music progression.
+        Analyze the acoustic features from the background music (BGM) of scene {scene_id} to understand emotional music storytelling.
         
-        STAGE 6 OVERALL SCENE EMOTION:
-        Curve: {scene_emotion_curve}
-        Dominant Emotions: {scene_dominant_emotions}
+        STAGE 7 GOALS - AI Detects:
+        - elevation bgm
+        - emotional violin
+        - suspense drums
+        - beat drops
+        - silence before reveal
+        - romantic melodies
+        - tragedy music
         
-        STAGE 7 EXTRACTED MUSIC FEATURES:
-        1. Energy Progression (5 segments of the scene, showing loudness swells): {music_features.get('energy_progression')}
-        2. Tempo: {music_features.get('tempo')} BPM
-        3. Spectral Contrast (High = violins/melodic, Low = drums/bass/dull): {music_features.get('spectral_contrast')}
-        4. Silence Ratio: {music_features.get('silence_ratio')} (1.0 means totally silent)
-        5. Absolute Peak Energy Timestamp: {music_features.get('peak_energy_time')}s
+        STAGE 7 AUDIO FEATURES (Librosa + Essentia):
+        1. Energy Progression (5 segments, swelling indicates rise): {music_features.get('energy_progression')}
+        2. Essentia BPM: {music_features.get('tempo')}
+        3. Spectral Centroid (High = emotional violin/bright melodies, Low = suspense drums/heavy bass): {music_features.get('spectral_centroid')}
+        4. Dynamic Complexity (High = intense cinematic sweeps/elevation bgm): {music_features.get('dynamic_complexity')}
+        5. Peak Onset Strength (High = massive beat drop/impact): {music_features.get('peak_onset_strength')}
+        6. Silence Ratio (Detects 'silence before reveal'): {music_features.get('silence_ratio')} (1.0 = total silence)
         
-        Based on this, map the BGM progression. For example, if energy swells significantly towards the end, and the scene is a 'suspense_peak', the BGM type might be 'suspense_rise' or 'emotional_payoff'.
+        ADDITIONAL UPGRADE: BGM EMOTION MAPPING
+        Stage 6 Emotion Curve: {scene_emotion_curve}
+        BGM-to-Emotion Sync: {bgm_emotion_mapping}
         
-        Provide your analysis ONLY as a valid JSON object matching this exact schema:
+        Based on these precise acoustic metrics and emotional sync, map the BGM progression.
+        
+        Provide your analysis ONLY as a valid JSON object matching this exact strict schema:
         {{
-            "bgm_type": "suspense_rise | emotional_payoff | heroic_elevation | silent_reveal | tragedy_peak | romance_bloom | tension_build | emotional_breakdown",
-            "intensity": integer 0-100,
-            "music_progression": ["step1", "step2", "step3", "step4"],
-            "cinematic_impact": "high | medium | low",
-            "music_emotion": "fear | sorrow | joy | suspense | heroic | romantic | neutral",
-            "peak_timestamp": float (estimate when the peak occurs based on peak_energy_time),
-            "viral_music_potential": integer 0-100
+            "bgm_type": "elevation_bgm | emotional_violin | suspense_drums | beat_drop | silence_before_reveal | romantic_melody | tragedy_music | suspense_rise",
+            "intensity": integer 0-100
         }}
         """
         
@@ -201,10 +225,5 @@ class BgmIntelligenceProcessor:
     def _mock_bgm_output(self):
         return {
             "bgm_type": "suspense_rise",
-            "intensity": 85,
-            "music_progression": ["calm", "tension_build", "silence", "beat_drop"],
-            "cinematic_impact": "high",
-            "music_emotion": "suspense",
-            "peak_timestamp": 0.0,
-            "viral_music_potential": 85
+            "intensity": 85
         }

@@ -16,19 +16,7 @@ class NarrativeIntelligenceProcessor:
         self.location = os.getenv("GCP_LOCATION")
         
         try:
-            self.llm_client = g- scene detection
-
-- face intelligence
-
-- OCR
-
-- ASR/transcription
-
-- emotion intelligence
-
-- BGM/music intelligence
-
-- actor trackingenai.Client(
+            self.llm_client = genai.Client(
                 vertexai=True, 
                 project=self.project_id, 
                 location=self.location
@@ -101,16 +89,8 @@ class NarrativeIntelligenceProcessor:
             })
             
             scene_payload = {
-                "scene_id": scene_id,
-                "status": "completed",
                 "arc_type": llm_response.get("arc_type", "unknown"),
-                "narrative_importance": llm_response.get("narrative_importance", 0),
-                "story_role": llm_response.get("story_role", "unknown"),
-                "connected_scenes": llm_response.get("connected_scenes", []),
-                "character_dynamics": llm_response.get("scene_character_dynamics", {}),
-                "narrative_progression": llm_response.get("narrative_progression", []),
-                "audience_payoff_strength": llm_response.get("audience_payoff_strength", 0),
-                "cinematic_significance": llm_response.get("cinematic_significance", "low")
+                "narrative_importance": llm_response.get("narrative_importance", 0)
             }
             
             out_path = self.narrative_dir / f"narrative_intelligence_{scene_id}.json"
@@ -154,9 +134,24 @@ class NarrativeIntelligenceProcessor:
             
         prompt = f"""
         You are the Core Story Brain (Senior Cinematic Narrative Director).
-        Your job is to understand long-range story connections, emotional arcs, and cinematic narrative progression.
+        Your job is to understand long-range story structure, character dynamics, and emotional payoffs.
         
         CURRENT SCENE ID: {scene_id}
+        
+        STAGE 8 GOALS - AI Must Understand:
+        - revenge arcs
+        - betrayal arcs
+        - emotional arcs
+        - comedy arcs
+        - romance arcs
+        - suspense buildup
+        - payoff scenes
+        - character relationships
+        
+        CRITICAL EXAMPLE OF STORY CONNECTION:
+        Hero insulted earlier -> emotional buildup -> revenge payoff later.
+        You must understand story connection, emotional meaning, and audience payoff.
+        Without this narrative intelligence, we only get random highlights. With it, we get cinematic storytelling!
         
         --- CURRENT SCENE DATA ---
         Dialogue Type: {scene_context['dialogue_type']}
@@ -174,29 +169,24 @@ class NarrativeIntelligenceProcessor:
         
         INSTRUCTIONS:
         1. Determine how this scene connects to the past scenes (e.g., does it payoff an earlier tension?).
-        2. Identify the role of this scene: is it a 'setup', 'buildup', 'tension_escalation', 'climax', or 'payoff'?
-        3. Identify the cinematic arc type (e.g., revenge_payoff, tragic_fall, heroic_redemption, emotional_reveal).
-        4. Update the long-term memory based on what happened here.
+        2. Identify the core cinematic arc type.
+        3. Score the narrative importance of this scene to the overall movie (0-100).
+        4. Update the long-term memory so you remember what happened for the next scenes.
         
         Provide your analysis ONLY as a valid JSON object matching this exact schema:
         {{
-            "arc_type": "string (e.g. revenge_payoff, betrayal_moment)",
+            "arc_type": "revenge_payoff | betrayal_arc | emotional_arc | comedy_arc | romance_arc | suspense_buildup | narrative_setup",
             "narrative_importance": integer 0-100,
-            "story_role": "setup | buildup | tension_escalation | climax | payoff",
-            "connected_scenes": ["SC_XXX", "SC_YYY"],
-            "scene_character_dynamics": {{"character_A": "state", "character_B": "state"}},
-            "narrative_progression": ["step1", "step2", "step3", "step4"],
-            "audience_payoff_strength": integer 0-100,
-            "cinematic_significance": "high | medium | low",
-            "updated_active_arcs": ["list of strings"],
-            "updated_character_dynamics": {{"global_char_A": "state"}},
-            "updated_unresolved_tensions": ["list of strings"]
+            "story_role": "setup | buildup | climax | payoff",
+            "updated_active_arcs": ["list of ongoing story threads"],
+            "updated_character_dynamics": {{"char_A": "current state with char_B"}},
+            "updated_unresolved_tensions": ["list of pending conflicts"]
         }}
         """
         
         try:
             response = self.llm_client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-pro",
                 contents=prompt
             )
             

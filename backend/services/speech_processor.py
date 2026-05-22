@@ -5,6 +5,8 @@ from pathlib import Path
 import requests
 import concurrent.futures
 from dotenv import load_dotenv
+import torch
+import whisperx
 from google import genai
 from services.audio_chunker import AudioChunker
 
@@ -22,6 +24,44 @@ class SpeechProcessor:
         self.speech_dir = self.output_base_dir / "speech"
         self.speech_dir.mkdir(parents=True, exist_ok=True)
         self.chunker = AudioChunker(self.speech_dir / "chunks")
+        
+        # Load WhisperX alignment model
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            logger.info(f"Loading WhisperX alignment model for Telugu (te) on {self.device}...")
+            self.align_model, self.align_metadata = whisperx.load_align_model(language_code="te", device=self.device)
+        except Exception as e:
+            logger.error(f"Failed to load WhisperX align model: {e}")
+            self.align_model, self.align_metadata = None, None
+            
+    def _force_align_transcript(self, audio_path: str, transcript: str) -> dict:
+        """Uses WhisperX to force align a transcript with the audio, extracting word-level timestamps."""
+        if not self.align_model or not transcript.strip():
+            logger.warning("Skipping alignment: Model not loaded or transcript is empty.")
+            return {"segments": [], "word_segments": []}
+            
+        logger.info(f"Starting WhisperX forced alignment for {audio_path}")
+        try:
+            audio = whisperx.load_audio(audio_path)
+            duration = audio.shape[0] / 16000.0
+            custom_transcript = [{"text": transcript, "start": 0.0, "end": duration}]
+            
+            result = whisperx.align(
+                custom_transcript,
+                self.align_model,
+                self.align_metadata,
+                audio,
+                self.device,
+                return_char_alignments=False
+            )
+            
+            return {
+                "segments": result.get("segments", []),
+                "word_segments": result.get("word_segments", [])
+            }
+        except Exception as e:
+            logger.error(f"WhisperX alignment failed: {e}")
+            return {"segments": [], "word_segments": []}
         
     def _mock_stt(self, scene_id: str) -> str:
         """Fallback mock STT when API keys or models are missing."""
@@ -140,7 +180,7 @@ class SpeechProcessor:
             "language": "te-IN"
         }
 
-    def calculate_dialogue_impact(self, transcript: str, audio_features: dict, scene_id: str) -> dict:
+    def calculate_dialogue_impact(self, transcript: str, audio_features: dict, scene_id: str, aligned_data: dict = None) -> dict:
         """The Dialogue Impact Engine: Uses Gemini to score Telugu cinematic tropes."""
         logger.info(f"Running Dialogue Impact Engine for {scene_id}")
         
@@ -160,7 +200,8 @@ class SpeechProcessor:
             "delivery_intensity": round(delivery_intensity, 1),
             "audience_recall": 50,
             "mass_appeal": 50,
-            "dramatic_pause_detected": dramatic_silence
+            "dramatic_pause_detected": dramatic_silence,
+            "whisperx_alignment": aligned_data or {"segments": [], "word_segments": []}
         }
 
         if not GEMINI_API_KEY or not transcript.strip():
@@ -274,12 +315,17 @@ class SpeechProcessor:
 
             # 2. STT Architecture (Sarvam Chunked Parallel)
             transcript_data = self.transcribe_audio_chunked(str(audio_path), scene_id)
+            transcript_text = transcript_data.get("transcript", "")
+            
+            # 2.5 WhisperX Forced Alignment
+            aligned_data = self._force_align_transcript(str(audio_path), transcript_text)
             
             # 3. Dialogue Impact Engine (LLM Semantic Scoring)
             impact_scores = self.calculate_dialogue_impact(
-                transcript=transcript_data.get("transcript", ""),
+                transcript=transcript_text,
                 audio_features=audio_features,
-                scene_id=scene_id
+                scene_id=scene_id,
+                aligned_data=aligned_data
             )
             
             intelligence_results.append(impact_scores)

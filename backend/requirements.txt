@@ -17,3 +17,9 @@ insightface
 onnxruntime
 scikit-learn
 scipy
+hsemotion
+timm==0.9.7
+whisperx
+emotiefflib
+essentia
+moviepy==1.0.3
