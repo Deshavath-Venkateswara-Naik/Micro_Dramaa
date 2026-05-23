@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import librosa
 from pydub import AudioSegment
+from transformers import pipeline
 
 try:
     import torch
@@ -27,6 +28,14 @@ class AudioProcessor:
         
         # Lazy loading for models
         self.demucs_model = None
+        
+        # Initialize SER model
+        try:
+            logger.info("Initializing Wav2Vec2 SER model...")
+            self.voice_emotion_model = pipeline("audio-classification", model="superb/wav2vec2-base-superb-er", device=0 if self.device == "cuda" else -1)
+        except Exception as e:
+            logger.error(f"Failed to load SER model: {e}")
+            self.voice_emotion_model = None
 
     def extract_scene_audio(self, video_path: str, scene_metadata_path: str) -> list[dict]:
         """Extracts audio chunks for each scene using FFmpeg."""
@@ -197,6 +206,22 @@ class AudioProcessor:
         except Exception:
             dramatic_silence = False
 
+        # Apply SER model to the dialogue stem
+        vocal_emotion_detected = "neutral"
+        vocal_emotion_confidence = 0.0
+        if self.voice_emotion_model and os.path.exists(stems["dialogue"]):
+            try:
+                # model outputs: [{'score': 0.8, 'label': 'neu'}, ...]
+                ser_result = self.voice_emotion_model(stems["dialogue"])
+                if ser_result:
+                    # Map superb labels to readable labels
+                    label_map = {"neu": "neutral", "ang": "anger", "hap": "happiness", "sad": "sadness"}
+                    top_pred = max(ser_result, key=lambda x: x["score"])
+                    vocal_emotion_detected = label_map.get(top_pred["label"], "neutral")
+                    vocal_emotion_confidence = round(float(top_pred["score"]), 2)
+            except Exception as e:
+                logger.error(f"SER failed for {scene_id}: {e}")
+
         features = {
             "scene_id": scene_id,
             "dialogue_path": stems["dialogue"],
@@ -208,7 +233,9 @@ class AudioProcessor:
                 "dramatic_silence": dramatic_silence,
                 "bgm_elevation_score": round(elevation_score, 2),
                 "crowd_hype_score": 0.5,
-                "dialogue_clarity": 0.9
+                "dialogue_clarity": 0.9,
+                "vocal_emotion_detected": vocal_emotion_detected,
+                "vocal_emotion_confidence": vocal_emotion_confidence
             }
         }
         

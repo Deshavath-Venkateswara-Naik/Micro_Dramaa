@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Constants
 SARVAM_API_URL = "https://api.sarvam.ai/speech-to-text"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 class SpeechProcessor:
     def __init__(self, output_base_dir: str):
@@ -33,6 +34,19 @@ class SpeechProcessor:
         except Exception as e:
             logger.error(f"Failed to load WhisperX align model: {e}")
             self.align_model, self.align_metadata = None, None
+            
+        # Load Pyannote Diarization Model
+        try:
+            if HF_TOKEN:
+                logger.info("Loading Pyannote Speaker Diarization model...")
+                from whisperx import diarize
+                self.diarize_model = diarize.DiarizationPipeline(token=HF_TOKEN, device=self.device)
+            else:
+                logger.warning("No HF_TOKEN found in environment. Speaker diarization will be skipped.")
+                self.diarize_model = None
+        except Exception as e:
+            logger.error(f"Failed to load Diarization model (check your HF_TOKEN and Pyannote TOS): {e}")
+            self.diarize_model = None
             
     def _force_align_transcript(self, audio_path: str, transcript: str) -> dict:
         """Uses WhisperX to force align a transcript with the audio, extracting word-level timestamps."""
@@ -54,6 +68,15 @@ class SpeechProcessor:
                 self.device,
                 return_char_alignments=False
             )
+            
+            # Diarization: assign speakers
+            if self.diarize_model:
+                try:
+                    logger.info("Running speaker diarization...")
+                    diarize_segments = self.diarize_model(audio)
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                except Exception as e:
+                    logger.error(f"Diarization failed: {e}")
             
             return {
                 "segments": result.get("segments", []),

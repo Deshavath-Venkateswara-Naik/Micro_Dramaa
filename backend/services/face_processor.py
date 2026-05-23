@@ -16,6 +16,8 @@ class FaceIntelligenceProcessor:
         self.output_base_dir = Path(output_base_dir)
         self.face_dir = self.output_base_dir / "faces"
         self.face_dir.mkdir(parents=True, exist_ok=True)
+        self.frames_dir = self.output_base_dir / "frames"
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
         
         # We assume the user has GCP_PROJECT_ID and GCP_LOCATION set for Vertex AI
         self.project_id = os.getenv("GCP_PROJECT_ID")
@@ -90,8 +92,8 @@ class FaceIntelligenceProcessor:
         self.actor_cache[new_actor_id] = embedding
         return new_actor_id
 
-    def _extract_and_analyze_frames(self, video_path: str, start_time_sec: float, end_time_sec: float, fps: int = 1) -> list:
-        """Extracts frames at a given FPS and analyzes faces/emotions using DeepFace."""
+    def _extract_and_analyze_frames(self, video_path: str, start_time_sec: float, end_time_sec: float, fps: int = 1, scene_id: str = "unknown") -> list:
+        """Extracts frames at a given FPS, saves them as JPEG, and analyzes faces/emotions."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             logger.error(f"Could not open video {video_path}")
@@ -106,6 +108,9 @@ class FaceIntelligenceProcessor:
         
         # Calculate step size based on target extraction fps
         frame_step = int(video_fps / fps) if video_fps > fps else 1
+        
+        scene_frames_dir = self.frames_dir / scene_id
+        scene_frames_dir.mkdir(parents=True, exist_ok=True)
         
         timeline = []
         
@@ -122,6 +127,11 @@ class FaceIntelligenceProcessor:
                 
             timestamp_sec = current_frame / video_fps
             
+            # Save the 1FPS frame to disk for later VLM/OCR processing
+            frame_filename = f"frame_{current_frame}.jpg"
+            frame_filepath = scene_frames_dir / frame_filename
+            cv2.imwrite(str(frame_filepath), frame)
+            
             try:
                 # Analyze frame with InsightFace
                 faces = self.face_app.get(frame)
@@ -132,6 +142,7 @@ class FaceIntelligenceProcessor:
                 
                 frame_data = {
                     "timestamp_sec": round(timestamp_sec, 2),
+                    "frame_path": str(frame_filepath),
                     "faces": []
                 }
                 
@@ -306,7 +317,7 @@ class FaceIntelligenceProcessor:
                 continue
                 
             logger.info(f"Extracting & analyzing faces for {scene_id} ({start_sec}s - {end_sec}s)")
-            timeline = self._extract_and_analyze_frames(video_path, start_sec, end_sec, fps=1)
+            timeline = self._extract_and_analyze_frames(video_path, start_sec, end_sec, fps=1, scene_id=scene_id)
             
             logger.info(f"Calculating cinematic scores for {scene_id}")
             cinematic_scores = self._calculate_cinematic_impact(scene_id, timeline)

@@ -3,24 +3,24 @@ import logging
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.face_processor import FaceIntelligenceProcessor
+from services.ocr_processor import OCRProcessor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    tags=["Face Intelligence"]
+    tags=["OCR Text Analysis"]
 )
 
-class FaceProcessRequest(BaseModel):
+class OCRProcessRequest(BaseModel):
     video_id: str
     video_path: str
     scene_metadata_path: str
 
-@router.post("/process-faces")
-async def process_faces(request: FaceProcessRequest):
+@router.post("/process-ocr")
+async def process_ocr(request: OCRProcessRequest):
     """
-    Stage 5: Cinematic Face Intelligence Engine
-    Extracts frames, analyzes facial emotions using DeepFace, and calculates cinematic scores.
+    Stage 4.6: OCR Text Analysis Engine
+    Extracts on-screen text (burned-in subtitles, title cards) from extracted frames.
     """
     try:
         video_path = Path(request.video_path)
@@ -32,24 +32,20 @@ async def process_faces(request: FaceProcessRequest):
         if not metadata_path.exists():
             raise HTTPException(status_code=404, detail=f"Metadata file not found at {request.scene_metadata_path}")
             
-        # The storage directory is typically /path/to/storage/MOV_ID/
         output_dir = metadata_path.parent
         
-        processor = FaceIntelligenceProcessor(str(output_dir))
+        processor = OCRProcessor(str(output_dir))
         
-        results = processor.process_faces(
-            str(video_path),
-            str(metadata_path)
-        )
+        results = processor.process_ocr(str(metadata_path))
         
         return {
             "status": "completed",
-            "message": f"Stage 5 Face Intelligence completed for {request.video_id}",
+            "message": f"Stage 4.6 OCR Analysis completed for {request.video_id}",
             "output_dir": str(output_dir),
             "processed_scenes": len(results),
-            "face_intelligence_results": results
+            "ocr_results": results
         }
         
     except Exception as e:
-        logger.error(f"Stage 5 processing failed: {e}")
+        logger.error(f"Stage 4.6 processing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

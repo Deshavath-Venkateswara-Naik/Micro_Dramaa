@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 import logging
-from services.sequencer_processor import DramaSequencerProcessor
+from services.sequencer_processor import EpisodicSequencingEngine
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/sequencer",
-    tags=["Stage 12 - AI Drama Sequencer"]
+    tags=["Stage 12 - Episodic Sequencing Engine"]
 )
 
 class SequencerRequest(BaseModel):
@@ -19,9 +19,9 @@ class SequencerRequest(BaseModel):
 @router.post("/process")
 async def process_sequencer(request: SequencerRequest):
     """
-    Stage 12: Run AI Drama Sequencer on all scenes.
+    Layer 4: Run Episodic Sequencing Engine on Story Candidates.
     """
-    logger.info(f"Starting AI Drama Sequencer for {request.video_id}")
+    logger.info(f"Starting Episodic Sequencing Engine for {request.video_id}")
     
     metadata_path = Path(request.scene_metadata_path)
     if not metadata_path.exists():
@@ -30,12 +30,12 @@ async def process_sequencer(request: SequencerRequest):
     output_base_dir = metadata_path.parent
     
     try:
-        processor = DramaSequencerProcessor(str(output_base_dir))
+        processor = EpisodicSequencingEngine(str(output_base_dir))
         results = processor.process_sequencer(request.video_id, request.scene_metadata_path)
         
         return {
             "status": "completed",
-            "message": "Stage 12 AI Drama Sequencer completed",
+            "message": "Layer 4 Episodic Sequencing Engine completed",
             "video_id": request.video_id,
             "results": results
         }

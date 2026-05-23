@@ -81,6 +81,7 @@ class EmotionIntelligenceProcessor:
             bgm_elevation = audio_features.get("bgm_elevation_score", 0)
             dramatic_silence = audio_features.get("dramatic_silence", False)
             audio_emotion_intensity = audio_features.get("emotion_intensity", 0)
+            vocal_emotion = audio_features.get("vocal_emotion_detected", "neutral")
             
             # Extract intelligence from Faces
             reaction_timeline = face_data.get("reaction_timeline", [])
@@ -115,7 +116,7 @@ class EmotionIntelligenceProcessor:
                 scene_id,
                 dialogue_type, dialogue_emotion, dialogue_impact, delivery_intensity,
                 bgm_elevation, dramatic_silence, closeups_count,
-                reaction_timeline, engagement_timeline, cinematic_scores, weighted_score
+                reaction_timeline, engagement_timeline, cinematic_scores, weighted_score, vocal_emotion
             )
             
             scene_payload = {
@@ -212,7 +213,7 @@ class EmotionIntelligenceProcessor:
         return engagement_data
 
     def _extract_emotional_curve(self, scene_id, d_type, d_emo, d_impact, v_intensity, 
-                                 bgm_elevation, silence, closeups, timeline, engagement_timeline, cinematic_scores, weighted_score):
+                                 bgm_elevation, silence, closeups, timeline, engagement_timeline, cinematic_scores, weighted_score, vocal_emotion):
         if not self.llm_client:
             return self._mock_emotion_output()
             
@@ -240,7 +241,7 @@ class EmotionIntelligenceProcessor:
         
         MULTIMODAL SIGNALS:
         1. Dialogue Meaning: {d_type}, Impact Score: {d_impact}/100, Emotion: {d_emo}
-        2. Voice Emotion/Delivery Intensity: {v_intensity}/100
+        2. Voice Emotion/Delivery Intensity: {v_intensity}/100, Acoustic Tone: {vocal_emotion}
         3. Background Music (BGM) Elevation Score: {bgm_elevation} (0.0 to 1.0)
         4. Dramatic Silence Duration Detected: {silence}
         5. Face Reactions: {closeups} close-up shots detected.
