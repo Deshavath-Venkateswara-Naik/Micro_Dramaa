@@ -24,7 +24,5 @@ emotiefflib
 essentia
 moviepy==1.0.3
 transformers
-paddlepaddle
-paddleocr
-easyocr
+
 tf-keras
