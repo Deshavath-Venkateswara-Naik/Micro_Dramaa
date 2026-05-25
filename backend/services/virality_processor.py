@@ -63,11 +63,8 @@ class ViralityIntelligenceProcessor:
                 "base_score": base_virality_score
             }
             
-            # Feed to LLM for Audience Psychology modeling
-            llm_response = self._extract_virality_logic(scene_id, scene_context)
-            
             scene_payload = {
-                "viral_probability": llm_response.get("viral_probability", int(base_virality_score))
+                "viral_probability": int(base_virality_score)
             }
             
             out_path = self.virality_dir / f"virality_intelligence_{scene_id}.json"
@@ -105,69 +102,4 @@ class ViralityIntelligenceProcessor:
                 logger.error(f"Error reading JSON {path}: {e}")
         return {}
         
-    def _extract_virality_logic(self, scene_id, context):
-        if not self.llm_client:
-            return self._mock_virality_output()
-            
-        prompt = f"""
-        You are the Core Audience Psychology & Virality Engine.
-        You have been trained on viral Telugu reels, YouTube Shorts, Instagram edits, fan edits, and mass movie clips.
-        Analyze the cinematic cues of Scene {scene_id} to predict its reel performance.
-        
-        --- CINEMATIC CUES ---
-        Emotion Curve: {context['emotion_curve']} (Emotions: {context['dominant_emotions']})
-        Music Type: {context['bgm_type']} (Progression: {context['music_progression']})
-        Story Arc: {context['arc_type']} (Role: {context['story_role']})
-        Character Dynamics: {context['character_dynamics']}
-        Base Algorithmic Score: {context['base_score']}/100
-        
-        STAGE 9 GOALS - AI Must Predict:
-        1. replay probability
-        2. retention
-        3. emotional engagement
-        4. meme potential
-        5. shareability
-        6. hook strength
-        
-        INSTRUCTIONS:
-        Reason through how this scene fits the mass reel algorithm (e.g. dopamine trigger from hero elevation, relatable meme face, mass BGM drop). Assign a score to each specific target metric, and finally combine them into a single 'viral_probability' score.
-        
-        Provide your analysis ONLY as a valid JSON object matching this exact schema:
-        {{
-            "replay_probability": integer 0-100,
-            "retention": integer 0-100,
-            "emotional_engagement": integer 0-100,
-            "meme_potential": integer 0-100,
-            "shareability": integer 0-100,
-            "hook_strength": integer 0-100,
-            "viral_probability": integer 0-100
-        }}
-        """
-        
-        try:
-            response = self.llm_client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt
-            )
-            
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-                
-            return json.loads(response_text.strip())
-        except Exception as e:
-            logger.error(f"Virality LLM failed: {e}")
-            return self._mock_virality_output()
-
-    def _mock_virality_output(self):
-        return {
-            "replay_probability": 88,
-            "retention": 90,
-            "emotional_engagement": 95,
-            "meme_potential": 65,
-            "shareability": 80,
-            "hook_strength": 92,
-            "viral_probability": 85
-        }
+    pass

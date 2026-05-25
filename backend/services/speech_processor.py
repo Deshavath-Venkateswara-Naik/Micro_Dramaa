@@ -87,8 +87,8 @@ class SpeechProcessor:
             return {"segments": [], "word_segments": []}
         
     def _mock_stt(self, scene_id: str) -> str:
-        """Fallback mock STT when API keys or models are missing."""
-        return "Nenu okkasari commit ayithe, na maata nene vinanu."
+        """Fallback empty string when API keys or models are missing."""
+        return ""
 
     def transcribe_audio_chunked(self, audio_path: str, scene_id: str) -> dict:
         """Chunks audio, transcribes chunks in parallel, and merges transcripts."""
@@ -204,85 +204,20 @@ class SpeechProcessor:
         }
 
     def calculate_dialogue_impact(self, transcript: str, audio_features: dict, scene_id: str, aligned_data: dict = None) -> dict:
-        """The Dialogue Impact Engine: Uses Gemini to score Telugu cinematic tropes."""
-        logger.info(f"Running Dialogue Impact Engine for {scene_id}")
+        """Saves raw speech and transcript data for downstream Multimodal Fusion."""
+        logger.info(f"Extracting Speech Features for {scene_id}")
         
         # Pull features from Stage 3
         delivery_intensity = float(audio_features.get("emotion_intensity", 0.5) * 100)
         dramatic_silence = bool(audio_features.get("dramatic_silence", False))
         
-        # Default fallback scores
         impact_payload = {
             "scene_id": scene_id,
             "text": transcript,
-            "dialogue_type": "general",
-            "emotion": "neutral",
-            "impact_score": 50,
-            "viral_score": 50,
-            "meme_potential": 50,
             "delivery_intensity": round(delivery_intensity, 1),
-            "audience_recall": 50,
-            "mass_appeal": 50,
             "dramatic_pause_detected": dramatic_silence,
             "whisperx_alignment": aligned_data or {"segments": [], "word_segments": []}
         }
-
-        if not GEMINI_API_KEY or not transcript.strip():
-            logger.info("No GEMINI_API_KEY found. Using heuristic fallback scoring.")
-            if "commit ayithe" in transcript.lower():
-                impact_payload.update({
-                    "dialogue_type": "mass_elevation",
-                    "emotion": "rage",
-                    "impact_score": 96,
-                    "viral_score": 92,
-                    "meme_potential": 85,
-                    "mass_appeal": 98
-                })
-        else:
-            try:
-                # Use the new GenAI SDK with Vertex AI backend to automatically pick up GOOGLE_APPLICATION_CREDENTIALS
-                project_id = os.getenv("GCP_PROJECT_ID")
-                location = os.getenv("GCP_LOCATION")
-                
-                client = genai.Client(
-                    vertexai=True, 
-                    project=project_id, 
-                    location=location
-                )
-                
-                prompt = f"""
-                You are a Senior Entertainment NLP Engineer specializing in Telugu Cinema and Viral Reel Intelligence.
-                Analyze the following Telugu dialogue. Calculate its viral potential for Instagram Reels/Shorts.
-                
-                Transcript: "{transcript}"
-                Acoustic Context: Delivery Intensity was {delivery_intensity}/100. Dramatic pause detected: {dramatic_silence}.
-
-                Respond ONLY with a valid JSON object matching this schema:
-                {{
-                    "dialogue_type": "mass_elevation | betrayal_confrontation | comedy_punch | emotional_breakdown | romance | suspense | general",
-                    "emotion": "rage | sorrow | joy | suspense | neutral",
-                    "impact_score": (int 0-100),
-                    "viral_score": (int 0-100),
-                    "meme_potential": (int 0-100),
-                    "audience_recall": (int 0-100),
-                    "mass_appeal": (int 0-100)
-                }}
-                """
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=prompt
-                )
-                
-                response_text = response.text.strip()
-                if response_text.startswith("```json"):
-                    response_text = response_text[7:]
-                if response_text.endswith("```"):
-                    response_text = response_text[:-3]
-                    
-                llm_scores = json.loads(response_text.strip())
-                impact_payload.update(llm_scores)
-            except Exception as e:
-                logger.error(f"Dialogue Impact LLM failed: {e}")
 
         # Wrap it in the exact structure requested by the user
         final_file_payload = {

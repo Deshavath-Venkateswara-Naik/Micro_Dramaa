@@ -65,12 +65,7 @@ class NostalgiaIntelligenceProcessor:
                 "arc_type": narrative_data.get("arc_type", "unknown")
             }
             
-            # Feed to LLM for Nostalgia Intelligence modeling
-            llm_response = self._extract_nostalgia_logic(scene_id, scene_context)
-            
-            scene_payload = {
-                "nostalgia_score": llm_response.get("nostalgia_score", 0)
-            }
+            scene_payload = scene_context
             
             out_path = self.nostalgia_dir / f"nostalgia_intelligence_{scene_id}.json"
             with open(out_path, 'w', encoding='utf-8') as f:
@@ -78,19 +73,16 @@ class NostalgiaIntelligenceProcessor:
                 
             scene_payload_for_master = scene_payload.copy()
             scene_payload_for_master["scene_id"] = scene_id
-            scene_payload_for_master["nostalgic_triggers"] = llm_response.get("nostalgic_triggers", [])
             intelligence_results.append(scene_payload_for_master)
 
         # Save master JSON
-        ranked_scenes = sorted(intelligence_results, key=lambda x: x["nostalgia_score"], reverse=True)
-        
         master_payload = {
             "status": "completed",
             "message": f"Stage 10 Nostalgia Intelligence Engine completed for {video_id}",
             "output_dir": str(self.output_base_dir),
             "processed_scenes": len(intelligence_results),
-            "top_nostalgic_scenes": [s["scene_id"] for s in ranked_scenes[:3]],
-            "nostalgia_intelligence_results": ranked_scenes
+            "top_nostalgic_scenes": [],
+            "nostalgia_intelligence_results": intelligence_results
         }
         
         master_path = self.nostalgia_dir / "master_nostalgia_intelligence.json"
@@ -108,57 +100,4 @@ class NostalgiaIntelligenceProcessor:
                 logger.error(f"Error reading JSON {path}: {e}")
         return {}
         
-    def _extract_nostalgia_logic(self, scene_id, context):
-        if not self.llm_client:
-            return self._mock_nostalgia_output()
-            
-        prompt = f"""
-        You are the Core Nostalgia Intelligence Engine (Vintage Cinema Archivist).
-        Your goal is to detect nostalgic emotional triggers specifically for old movies, as old movie engagement depends heavily on nostalgia.
-        
-        --- SCENE CUES ---
-        Dialogue Snippet: "{context['dialogue']}"
-        Faces/Actors Detected: {context['faces_detected']}
-        Background Music Type: {context['bgm_type']}
-        Cinematic Arc Type: {context['arc_type']}
-        
-        STAGE 10 GOALS - AI Detects:
-        - iconic actors
-        - retro bgm
-        - famous dialogues
-        - legendary scenes
-        - vintage emotional moments
-        
-        INSTRUCTIONS:
-        Analyze the scene cues. If you identify legendary narrative tropes, iconic actor presence, or specific retro BGM cues, it implies a high nostalgic value for the audience.
-        Calculate a final 'nostalgia_score' (0-100).
-        
-        Provide your analysis ONLY as a valid JSON object matching this exact schema:
-        {{
-            "nostalgia_score": integer 0-100,
-            "nostalgic_triggers": ["list of detected triggers, e.g. iconic_actor, retro_bgm"]
-        }}
-        """
-        
-        try:
-            response = self.llm_client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt
-            )
-            
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-                
-            return json.loads(response_text.strip())
-        except Exception as e:
-            logger.error(f"Nostalgia LLM failed: {e}")
-            return self._mock_nostalgia_output()
-
-    def _mock_nostalgia_output(self):
-        return {
-            "nostalgia_score": 88,
-            "nostalgic_triggers": ["iconic_actors", "retro_bgm"]
-        }
+    pass

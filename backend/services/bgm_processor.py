@@ -68,10 +68,7 @@ class BgmIntelligenceProcessor:
             elif not isinstance(music_output, dict):
                 music_output = {}
             
-            scene_payload = {
-                "bgm_type": music_output.get("bgm_type", "unknown"),
-                "intensity": music_output.get("intensity", 0)
-            }
+            scene_payload = music_output
             
             out_path = self.music_dir / f"bgm_intelligence_{scene_id}.json"
             with open(out_path, 'w', encoding='utf-8') as f:
@@ -156,74 +153,5 @@ class BgmIntelligenceProcessor:
             return {}
 
     def _extract_music_curve(self, scene_id, music_features, emotion_data):
-        if not self.llm_client:
-            return self._mock_bgm_output()
-            
-        # Context from Stage 6
-        scene_emotion_curve = emotion_data.get("emotion_curve", "unknown")
-        emotion_peak_time = emotion_data.get("peak_timestamp", 0.0)
-        
-        # BGM Emotion Mapping
-        music_peak_time = music_features.get('peak_energy_time', 0.0)
-        sync_delta = abs(music_peak_time - emotion_peak_time)
-        if emotion_peak_time > 0 and sync_delta <= 2.0:
-            bgm_emotion_mapping = f"PERFECT SYNC ({sync_delta}s diff): Music rise directly hits the emotional peak!"
-        else:
-            bgm_emotion_mapping = f"ASYNC ({sync_delta}s diff): Music peaks independently or there is no clear peak."
-        
-        prompt = f"""
-        You are a Senior Cinematic Music Director and Composer.
-        Analyze the acoustic features from the background music (BGM) of scene {scene_id} to understand emotional music storytelling.
-        
-        STAGE 7 GOALS - AI Detects:
-        - elevation bgm
-        - emotional violin
-        - suspense drums
-        - beat drops
-        - silence before reveal
-        - romantic melodies
-        - tragedy music
-        
-        STAGE 7 AUDIO FEATURES (Librosa + Essentia):
-        1. Energy Progression (5 segments, swelling indicates rise): {music_features.get('energy_progression')}
-        2. Essentia BPM: {music_features.get('tempo')}
-        3. Spectral Centroid (High = emotional violin/bright melodies, Low = suspense drums/heavy bass): {music_features.get('spectral_centroid')}
-        4. Dynamic Complexity (High = intense cinematic sweeps/elevation bgm): {music_features.get('dynamic_complexity')}
-        5. Peak Onset Strength (High = massive beat drop/impact): {music_features.get('peak_onset_strength')}
-        6. Silence Ratio (Detects 'silence before reveal'): {music_features.get('silence_ratio')} (1.0 = total silence)
-        
-        ADDITIONAL UPGRADE: BGM EMOTION MAPPING
-        Stage 6 Emotion Curve: {scene_emotion_curve}
-        BGM-to-Emotion Sync: {bgm_emotion_mapping}
-        
-        Based on these precise acoustic metrics and emotional sync, map the BGM progression.
-        
-        Provide your analysis ONLY as a valid JSON object matching this exact strict schema:
-        {{
-            "bgm_type": "elevation_bgm | emotional_violin | suspense_drums | beat_drop | silence_before_reveal | romantic_melody | tragedy_music | suspense_rise",
-            "intensity": integer 0-100
-        }}
-        """
-        
-        try:
-            response = self.llm_client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt
-            )
-            
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-                
-            return json.loads(response_text.strip())
-        except Exception as e:
-            logger.error(f"Cinematic Music LLM failed: {e}")
-            return self._mock_bgm_output()
-
-    def _mock_bgm_output(self):
-        return {
-            "bgm_type": "suspense_rise",
-            "intensity": 85
-        }
+        # We now just return the raw features for Multimodal Fusion
+        return music_features

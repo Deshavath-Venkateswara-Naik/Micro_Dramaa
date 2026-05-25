@@ -226,68 +226,8 @@ class FaceIntelligenceProcessor:
         return timeline
 
     def _calculate_cinematic_impact(self, scene_id: str, timeline: list) -> dict:
-        """Uses Gemini 2.0 Flash to calculate Hero Elevation & Mother Sentiment scores from the emotion timeline."""
-        if not self.llm_client:
-            return self._mock_cinematic_scores()
-            
-        if not timeline:
-            return self._mock_cinematic_scores()
-            
-        # Simplify timeline for LLM context window
-        simplified_timeline = []
-        for t in timeline:
-            if t["faces"]:
-                emotions = [f"{f['actor_id']} (Closeup: {f['is_closeup']}) showing {f['emotion']}" for f in t["faces"]]
-                simplified_timeline.append(f"At {t['timestamp_sec']}s: " + " | ".join(emotions))
-                
-        prompt = f"""
-        You are a Senior Entertainment AI Director specializing in Indian Cinema.
-        Analyze the following sequential timeline of facial emotions from a scene.
-        Calculate the cinematic impact scores (0-100) for this scene.
-        
-        Consider:
-        - Hero Elevation: Look for angry/intense closeups, dramatic pauses, or silent stares.
-        - Mother Sentiment: Look for crying, sad, or emotional closeups.
-        - Viral Potential: Strong emotional shifts or intense facial expressions.
-        
-        Timeline:
-        {json.dumps(simplified_timeline, indent=2)}
-        
-        Return ONLY a JSON object with these exact keys:
-        {{
-            "hero_elevation_score": int,
-            "mother_sentiment_score": int,
-            "comedy_timing_score": int,
-            "viral_reaction_potential": int,
-            "primary_cinematic_cue": "string description"
-        }}
-        """
-        
-        try:
-            response = self.llm_client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt
-            )
-            
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-                
-            return json.loads(response_text.strip())
-        except Exception as e:
-            logger.error(f"Cinematic Impact LLM failed: {e}")
-            return self._mock_cinematic_scores()
-
-    def _mock_cinematic_scores(self):
-        return {
-            "hero_elevation_score": 50,
-            "mother_sentiment_score": 50,
-            "comedy_timing_score": 50,
-            "viral_reaction_potential": 50,
-            "primary_cinematic_cue": "neutral"
-        }
+        """Returns empty dict since cinematic impact is now handled by Multimodal Fusion."""
+        return {}
 
     def process_faces(self, video_path: str, scene_metadata_path: str) -> list:
         """End-to-end processing for Stage 5."""

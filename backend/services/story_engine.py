@@ -56,41 +56,13 @@ class StoryIntelligenceEngine:
         
         # 2. Gather all Data
         scene_list_data = scenes
-        transcript_data = []
-        emotion_data = []
-        audio_events_data = []
-        face_data = []
-        bgm_data_list = []
-        virality_data_list = []
-        nostalgia_data_list = []
-        drama_data_list = []
+        fusion_data = []
         
         for scene in scenes:
             scene_id = scene.get("scene_id")
             
-            t_data = self._read_json(self.output_base_dir / "speech" / f"transcript_{scene_id}.json")
-            if t_data: transcript_data.append(t_data)
-            
-            e_data = self._read_json(self.output_base_dir / "emotions" / f"emotion_{scene_id}.json")
-            if e_data: emotion_data.append(e_data)
-            
-            a_data = self._read_json(self.output_base_dir / "audio" / "features" / f"features_{scene_id}.json")
-            if a_data: audio_events_data.append(a_data)
-            
-            f_data = self._read_json(self.output_base_dir / "faces" / f"face_intelligence_{scene_id}.json")
-            if f_data: face_data.append(f_data)
-            
-            b_data = self._read_json(self.output_base_dir / "music" / f"bgm_intelligence_{scene_id}.json")
-            if b_data: bgm_data_list.append(b_data)
-            
-            v_data = self._read_json(self.output_base_dir / "virality" / f"virality_intelligence_{scene_id}.json")
-            if v_data: virality_data_list.append(v_data)
-            
-            n_data = self._read_json(self.output_base_dir / "nostalgia" / f"nostalgia_intelligence_{scene_id}.json")
-            if n_data: nostalgia_data_list.append(n_data)
-            
-            d_data = self._read_json(self.output_base_dir / "drama" / f"drama_score_{scene_id}.json")
-            if d_data: drama_data_list.append(d_data)
+            f_data = self._read_json(self.output_base_dir / "fusion" / f"multimodal_intelligence_{scene_id}.json")
+            if f_data: fusion_data.append(f_data)
 
         # Get video duration to prevent hallucinations
         try:
@@ -160,27 +132,52 @@ Your task is to analyze structured entertainment scene data to extract the perfe
    - EXACT END_TIME: Must cut to black exactly at the peak of the cliffhanger or reaction shot. DO NOT let the clip bleed into the next unrelated scene or conversation.
    - Cross-reference Transcript timestamps with Face and Audio Intelligence timestamps to guarantee frame-accurate, narratively cohesive boundaries.
 
+6. EPISODIC SEQUENCING RULES:
+   - Identify characters and map out their relational graph.
+   - You MUST order the extracted episodes strictly in chronological order based on their start_time. Never jump backward in time. (e.g., Episode 5 MUST have a start_time that occurs after Episode 4).
+   - Ensure the cliffhanger of Episode N naturally links into the hook of Episode N+1.
+
 --- OUTPUT FORMAT REQUIREMENTS ---
 You MUST respond with ONLY valid, parseable JSON. Do not include markdown formatting like ```json or any prose outside the JSON.
 The JSON must be a list of candidate objects matching this exact schema:
 
-[
-  {
-    "start_time": "HH:MM:SS",
-    "end_time": "HH:MM:SS",
-    "duration_seconds": 0,
-    "binge_worthy_title": "string",
-    "first_3_second_hook_caption": "string",
-    "emotional_hook_description": "string",
-    "central_conflict_type": "string",
-    "relatable_theme": "string",
-    "dramatic_peak_timestamp": "HH:MM:SS",
-    "cliffhanger_ending_description": "string",
-    "retention_score_0_to_100": 0,
-    "characters_present": ["string"],
-    "virality_and_psychology_analysis": "string"
-  }
-]
+{
+  "series_title": "Binge-worthy title for the whole series",
+  "character_graph": {
+    "characters": [
+      { "id": "char_01", "name": "Name/Role", "role": "protagonist/antagonist/etc" }
+    ],
+    "relationships": [
+      {
+        "from": "char_01",
+        "to": "char_02",
+        "type": "parent_child/lovers/rivals/etc",
+        "arc": "betrayal_discovery/etc",
+        "tension": "high/medium/low"
+      }
+    ]
+  },
+  "episodes": [
+    {
+      "episode_number": 1,
+      "episode_title": "string",
+      "start_time": "HH:MM:SS",
+      "end_time": "HH:MM:SS",
+      "duration_seconds": 0,
+      "first_3_second_hook_caption": "string",
+      "emotional_hook_description": "string",
+      "central_conflict_type": "string",
+      "relatable_theme": "string",
+      "dramatic_peak_timestamp": "HH:MM:SS",
+      "cliffhanger_ending_description": "string",
+      "retention_score_0_to_100": 0,
+      "characters_present": ["string"],
+      "virality_and_psychology_analysis": "string",
+      "narrative_role": "setup/escalation/confrontation/peak",
+      "cliffhanger_link": "How this connects to Episode 2"
+    }
+  ]
+}
 
 Failure to adhere to this JSON schema will result in system failure.
 """
@@ -197,27 +194,8 @@ Video Metadata:
 1. SCENE LIST:
 {json.dumps(scene_list_data, indent=2)}
 
-2. TRANSCRIPT:
-{json.dumps(transcript_data, indent=2)}
-
-3. EMOTION TIMELINE:
-{json.dumps(emotion_data, indent=2)}
-
-4. AUDIO EVENTS:
-{json.dumps(audio_events_data, indent=2)}
-
-5. FACE INTELLIGENCE:
-{json.dumps(face_data, indent=2)}
-
-6. BGM & MUSIC CUES:
-{json.dumps(bgm_data_list, indent=2)}
-
-7. VIRALITY, DRAMA, & NOSTALGIA SCORES:
-{json.dumps({
-    "virality": virality_data_list,
-    "nostalgia": nostalgia_data_list,
-    "drama": drama_data_list
-}, indent=2)}
+2. MULTIMODAL FUSION INTELLIGENCE:
+{json.dumps(fusion_data, indent=2)}
 
 --- INSTRUCTIONS ---
 Extract ALL valid high-impact microdrama candidates from the provided video.
@@ -227,7 +205,7 @@ Ensure each candidate is between 30 and 90 seconds.
 Ensure boundaries (start_time/end_time) are frame-accurate, do not cut dialogue mid-sentence, and do not bleed into unrelated scenes.
 CRITICAL TIMING RULE: DO NOT hallucinate timestamps! The video is exactly {video_duration_formatted} ({video_duration_sec}s) long. Any timestamp exceeding this limit is physically impossible and will crash the pipeline. All timestamps MUST match exactly with the provided transcript chunks.
 Ensure each candidate ends on a cliffhanger.
-Return strictly the JSON array as defined in the system prompt. No prose.
+Return strictly the JSON object containing series_title, character_graph, and chronologically ordered episodes as defined in the system prompt. No prose.
 """
 
         # Build contents array with all uploaded video chunks followed by the user prompt

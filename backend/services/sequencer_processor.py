@@ -59,8 +59,9 @@ class EpisodicSequencingEngine:
                     transcript_data.append(json.load(f))
                     
         # Extract episodic sequencing logic
-        logger.info("Sending candidates to Episodic Sequencing Engine (Gemini 2.5 Pro)...")
-        llm_response = self._extract_episodic_logic(video_id, candidates, transcript_data)
+        logger.info("Extracting episodic sequencing from Story Engine candidates...")
+        # Since story_engine.py now generates the full sequence, we just pass it through
+        llm_response = story_data.get("microdrama_candidates", {})
         
         master_payload = {
             "status": "completed",
@@ -74,72 +75,3 @@ class EpisodicSequencingEngine:
             json.dump(master_payload, f, indent=4, ensure_ascii=False)
             
         return master_payload
-
-    def _extract_episodic_logic(self, video_id, candidates, transcript_data):
-        prompt = f"""
-        You are the Master Showrunner (Episodic Sequencing Engine) for an OTT Microdrama series.
-        Your goal is to organize isolated story candidates into a coherent, serialized short-form series.
-        
-        --- CANDIDATE CLIPS (From Story Engine) ---
-        {json.dumps(candidates, indent=2)}
-        
-        --- TRANSCRIPTS (For Character Context) ---
-        {json.dumps(transcript_data, indent=2)}
-        
-        STAGE 4 SEQUENCING RULES:
-        1. Character Graph: Identify characters and their relationships based on the text.
-        2. Filter & Chronological Ordering (CRITICAL): Group candidates by shared arcs, but you MUST order the episodes strictly in chronological order based on their start_time. Never jump backward in time. (e.g., Episode 5 MUST have a start_time that occurs after Episode 4).
-        3. Episodes: Assign sequential episode numbers based on the chronological timeline.
-        4. Cliffhanger Linking: Ensure the cliffhanger of Episode N naturally leads into the hook of Episode N+1.
-        
-        Provide your analysis ONLY as a valid JSON object matching this exact schema:
-        {{
-            "series_title": "Binge-worthy title for the whole series",
-            "character_graph": {{
-                "characters": [
-                    {{ "id": "char_01", "name": "Name/Role", "role": "protagonist/antagonist/etc" }}
-                ],
-                "relationships": [
-                    {{
-                        "from": "char_01",
-                        "to": "char_02",
-                        "type": "parent_child/lovers/rivals/etc",
-                        "arc": "betrayal_discovery/etc",
-                        "tension": "high/medium/low"
-                    }}
-                ]
-            }},
-            "episodes": [
-                {{
-                    "episode_number": 1,
-                    "episode_title": "Title",
-                    "candidate_reference": "Description of the clip",
-                    "start_time": "HH:MM:SS",
-                    "end_time": "HH:MM:SS",
-                    "narrative_role": "setup/escalation/confrontation/peak",
-                    "cliffhanger_link": "How this connects to Episode 2"
-                }}
-            ]
-        }}
-        """
-        
-        try:
-            response = self.llm_client.models.generate_content(
-                model="gemini-2.5-pro",
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    temperature=0.7,
-                    response_mime_type="application/json"
-                )
-            )
-            
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-                
-            return json.loads(response_text.strip())
-        except Exception as e:
-            logger.error(f"Episodic Sequencing LLM failed: {e}")
-            return {"error": str(e)}
