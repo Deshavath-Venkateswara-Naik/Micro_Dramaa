@@ -3,205 +3,131 @@ import json
 import logging
 from pathlib import Path
 import requests
-import concurrent.futures
+import time
 from dotenv import load_dotenv
-import torch
-import whisperx
-from google import genai
-from services.audio_chunker import AudioChunker
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 # Constants
-SARVAM_API_URL = "https://api.sarvam.ai/speech-to-text"
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+SUBTITLE_API_BASE_URL = "http://43.157.32.181:8080"
+# This needs to be set to your actual public IP/domain so the Subtitle API can reach your local files
+PUBLIC_SERVER_URL = os.environ.get("PUBLIC_SERVER_URL", "http://YOUR_SERVER_IP:8000")
 
 class SpeechProcessor:
     def __init__(self, output_base_dir: str):
         self.output_base_dir = Path(output_base_dir)
         self.speech_dir = self.output_base_dir / "speech"
         self.speech_dir.mkdir(parents=True, exist_ok=True)
-        self.chunker = AudioChunker(self.speech_dir / "chunks")
         
-        # Load WhisperX alignment model
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+    def _upload_to_gcs(self, local_audio_path: str, scene_id: str) -> str:
+        """Uploads audio to GCS and returns a signed URL for the Subtitle API."""
         try:
-            logger.info(f"Loading WhisperX alignment model for Telugu (te) on {self.device}...")
-            self.align_model, self.align_metadata = whisperx.load_align_model(language_code="te", device=self.device)
-        except Exception as e:
-            logger.error(f"Failed to load WhisperX align model: {e}")
-            self.align_model, self.align_metadata = None, None
+            from google.cloud import storage
+            from datetime import timedelta
             
-        # Load Pyannote Diarization Model
-        try:
-            if HF_TOKEN:
-                logger.info("Loading Pyannote Speaker Diarization model...")
-                from whisperx import diarize
-                self.diarize_model = diarize.DiarizationPipeline(token=HF_TOKEN, device=self.device)
-            else:
-                logger.warning("No HF_TOKEN found in environment. Speaker diarization will be skipped.")
-                self.diarize_model = None
-        except Exception as e:
-            logger.error(f"Failed to load Diarization model (check your HF_TOKEN and Pyannote TOS): {e}")
-            self.diarize_model = None
+            bucket_name = "videograph-ai-microdrama-assets"
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
             
-    def _force_align_transcript(self, audio_path: str, transcript: str) -> dict:
-        """Uses WhisperX to force align a transcript with the audio, extracting word-level timestamps."""
-        if not self.align_model or not transcript.strip():
-            logger.warning("Skipping alignment: Model not loaded or transcript is empty.")
-            return {"segments": [], "word_segments": []}
+            # Create a unique blob name
+            blob_name = f"tmp_audio/{scene_id}_{os.path.basename(local_audio_path)}"
+            blob = bucket.blob(blob_name)
             
-        logger.info(f"Starting WhisperX forced alignment for {audio_path}")
-        try:
-            audio = whisperx.load_audio(audio_path)
-            duration = audio.shape[0] / 16000.0
-            custom_transcript = [{"text": transcript, "start": 0.0, "end": duration}]
+            logger.info(f"Uploading {local_audio_path} to GCS bucket {bucket_name}...")
+            blob.upload_from_filename(local_audio_path)
             
-            result = whisperx.align(
-                custom_transcript,
-                self.align_model,
-                self.align_metadata,
-                audio,
-                self.device,
-                return_char_alignments=False
+            # Generate signed URL valid for 1 hour
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(hours=1),
+                method="GET"
             )
-            
-            # Diarization: assign speakers
-            if self.diarize_model:
-                try:
-                    logger.info("Running speaker diarization...")
-                    diarize_segments = self.diarize_model(audio)
-                    result = whisperx.assign_word_speakers(diarize_segments, result)
-                except Exception as e:
-                    logger.error(f"Diarization failed: {e}")
-            
-            return {
-                "segments": result.get("segments", []),
-                "word_segments": result.get("word_segments", [])
-            }
+            return url
         except Exception as e:
-            logger.error(f"WhisperX alignment failed: {e}")
-            return {"segments": [], "word_segments": []}
-        
-    def _mock_stt(self, scene_id: str) -> str:
-        """Fallback empty string when API keys or models are missing."""
-        return ""
+            logger.error(f"GCS Upload Failed: {e}")
+            return ""
 
-    def transcribe_audio_chunked(self, audio_path: str, scene_id: str) -> dict:
-        """Chunks audio, transcribes chunks in parallel, and merges transcripts."""
-        chunks = self.chunker.chunk_audio(audio_path, scene_id)
-        if not chunks:
-            return {"scene_id": scene_id, "transcript": "", "provider": "mock", "language": "te-IN"}
+    def transcribe_with_subtitle_api(self, audio_path: str, scene_id: str) -> dict:
+        """Uses the asynchronous Subtitle API to transcribe audio and get word timestamps."""
+        public_url = self._upload_to_gcs(audio_path, scene_id)
+        if not public_url:
+            logger.error(f"Could not resolve public URL for {audio_path}")
+            return {"transcript": "", "segments": []}
             
-        logger.info(f"Dispatching {len(chunks)} chunks to Sarvam API in parallel...")
+        logger.info(f"Submitting job to Subtitle API for {scene_id} using URL: {public_url}")
         
-        results = []
-        provider = "mock"
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_chunk = {
-                executor.submit(self.transcribe_audio_chunk, chunk["file_path"], chunk["chunk_id"]): chunk 
-                for chunk in chunks
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_chunk):
-                chunk_meta = future_to_chunk[future]
-                try:
-                    result = future.result()
-                    results.append((chunk_meta["global_offset_ms"], result["transcript"], result["provider"]))
-                except Exception as exc:
-                    logger.error(f"Chunk {chunk_meta['chunk_id']} generated an exception: {exc}")
-                    results.append((chunk_meta["global_offset_ms"], self._mock_stt(scene_id), "mock"))
-                    
-        # Sort results by global_offset_ms to ensure chronological order
-        results.sort(key=lambda x: x[0])
-        
-        merged_transcript = []
-        for offset, text, prov in results:
-            # STT Hallucination Filter: Collapse consecutive repeated words
-            words = text.strip().split()
-            cleaned_words = []
-            if words:
-                cleaned_words.append(words[0])
-                count = 1
-                for word in words[1:]:
-                    if word == cleaned_words[-1]:
-                        count += 1
-                        if count <= 2:  # Keep max 2 repetitions
-                            cleaned_words.append(word)
-                    else:
-                        count = 1
-                        cleaned_words.append(word)
-                        
-            filtered_text = " ".join(cleaned_words)
-            
-            # If the entire chunk was just 1 or 2 unique words repeated, drop it completely
-            if len(words) > 5 and len(set(words)) <= 2:
-                logger.info(f"Dropped completely hallucinated chunk at offset {offset}ms: {text[:30]}...")
-                continue
+        # 1. Create Job
+        try:
+            response = requests.post(
+                f"{SUBTITLE_API_BASE_URL}/jobs",
+                json={
+                    "url": public_url,
+                    "language": "te", # Telugu
+                    "word_timestamps": True
+                },
+                timeout=10
+            )
+            if response.status_code != 202:
+                logger.error(f"Failed to create Subtitle API job: {response.text}")
+                return {"transcript": "", "segments": []}
                 
-            if filtered_text.strip():
-                merged_transcript.append(filtered_text.strip())
-                
-            if prov != "mock":
-                provider = prov
-                
-        final_text = " ".join(merged_transcript)
-        
-        stt_payload = {
-            "scene_id": scene_id,
-            "transcript": final_text,
-            "provider": provider,
-            "language": "te-IN"
-        }
-        
-        out_path = self.speech_dir / f"transcript_{scene_id}.json"
-        with open(out_path, 'w') as f:
-            json.dump(stt_payload, f, indent=4)
+            job_data = response.json()
+            job_id = job_data.get("job_id")
             
-        return stt_payload
-
-    def transcribe_audio_chunk(self, audio_path: str, chunk_id: str) -> dict:
-        """Transcribes a single Telugu audio chunk using Sarvam AI."""
-        logger.info(f"Starting STT for {chunk_id}")
-        sarvam_key = os.environ.get("SARVAM_API_KEY")
+        except Exception as e:
+            logger.error(f"Error creating Subtitle API job: {e}")
+            return {"transcript": "", "segments": []}
+            
+        # 2. Poll for Completion
+        logger.info(f"Job {job_id} created. Polling for completion...")
+        max_retries = 60 # 60 * 5s = 5 minutes timeout per scene
         
-        transcript = ""
-        
-        if sarvam_key and os.path.exists(audio_path):
+        for _ in range(max_retries):
+            time.sleep(5)
             try:
-                headers = {"api-subscription-key": sarvam_key}
-                files = {
-                    'file': (
-                        os.path.basename(audio_path), 
-                        open(audio_path, 'rb'), 
-                        'audio/wav'
-                    )
-                }
-                data = {'model': 'saaras:v3', 'language_code': 'te-IN'}
-                response = requests.post(SARVAM_API_URL, headers=headers, files=files, data=data)
-                
-                if response.status_code == 200:
-                    transcript = response.json().get("transcript", "")
-                else:
-                    logger.error(f"Sarvam API failed for {chunk_id}: {response.text}")
-                    transcript = self._mock_stt(chunk_id)
+                poll_res = requests.get(f"{SUBTITLE_API_BASE_URL}/jobs/{job_id}", timeout=10)
+                if poll_res.status_code == 200:
+                    status_data = poll_res.json()
+                    status = status_data.get("status")
+                    
+                    if status == "Completed":
+                        result_url = status_data.get("result_url")
+                        logger.info(f"Job {job_id} completed. Fetching results from {result_url}")
+                        return self._fetch_and_parse_results(result_url)
+                    elif status == "Failed":
+                        logger.error(f"Job {job_id} failed: {status_data.get('error')}")
+                        return {"transcript": "", "segments": []}
+                        
             except Exception as e:
-                logger.error(f"Error calling Sarvam STT for {chunk_id}: {e}")
-                transcript = self._mock_stt(chunk_id)
-        else:
-            logger.info(f"No SARVAM_API_KEY found or audio missing. Using mock Telugu STT for {chunk_id}.")
-            transcript = self._mock_stt(chunk_id)
-
-        return {
-            "chunk_id": chunk_id,
-            "transcript": transcript,
-            "provider": "sarvam" if sarvam_key else "mock",
-            "language": "te-IN"
-        }
+                logger.warning(f"Error polling job {job_id}: {e}")
+                
+        logger.error(f"Job {job_id} timed out after polling.")
+        return {"transcript": "", "segments": []}
+        
+    def _fetch_and_parse_results(self, result_url: str) -> dict:
+        """Downloads the JSON result and formats it for our pipeline."""
+        if not result_url:
+            return {"transcript": "", "segments": []}
+            
+        try:
+            res = requests.get(result_url, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                # Subtitle API format returns 'transcript' and 'words'
+                full_text = data.get("transcript", "")
+                if not full_text:
+                    full_text = data.get("sub_text", "")
+                    
+                return {
+                    "transcript": full_text.strip(),
+                    "segments": data.get("words", [])
+                }
+        except Exception as e:
+            logger.error(f"Failed to fetch subtitle results from {result_url}: {e}")
+            
+        return {"transcript": "", "segments": []}
 
     def calculate_dialogue_impact(self, transcript: str, audio_features: dict, scene_id: str, aligned_data: dict = None) -> dict:
         """Saves raw speech and transcript data for downstream Multimodal Fusion."""
@@ -216,7 +142,7 @@ class SpeechProcessor:
             "text": transcript,
             "delivery_intensity": round(delivery_intensity, 1),
             "dramatic_pause_detected": dramatic_silence,
-            "whisperx_alignment": aligned_data or {"segments": [], "word_segments": []}
+            "whisperx_alignment": aligned_data or {"segments": []}
         }
 
         # Wrap it in the exact structure requested by the user
@@ -271,19 +197,16 @@ class SpeechProcessor:
                     features_data = json.load(f)
                     audio_features = features_data.get("audio_features", {})
 
-            # 2. STT Architecture (Sarvam Chunked Parallel)
-            transcript_data = self.transcribe_audio_chunked(str(audio_path), scene_id)
-            transcript_text = transcript_data.get("transcript", "")
+            # 2. STT Architecture (Subtitle API)
+            stt_results = self.transcribe_with_subtitle_api(str(audio_path), scene_id)
+            transcript_text = stt_results.get("transcript", "")
             
-            # 2.5 WhisperX Forced Alignment
-            aligned_data = self._force_align_transcript(str(audio_path), transcript_text)
-            
-            # 3. Dialogue Impact Engine (LLM Semantic Scoring)
+            # 3. Dialogue Impact Engine
             impact_scores = self.calculate_dialogue_impact(
                 transcript=transcript_text,
                 audio_features=audio_features,
                 scene_id=scene_id,
-                aligned_data=aligned_data
+                aligned_data={"segments": stt_results.get("segments", [])}
             )
             
             intelligence_results.append(impact_scores)

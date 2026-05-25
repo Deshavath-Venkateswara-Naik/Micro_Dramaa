@@ -54,13 +54,11 @@ class MultimodalFusionProcessor:
             scene_id = scene.get("scene_id")
             
             # Read Stage outputs
-            face_data = self._read_json(self.output_base_dir / "faces" / f"face_intelligence_{scene_id}.json")
             speech_data = self._read_json(self.output_base_dir / "speech" / f"transcript_{scene_id}.json")
             bgm_data = self._read_json(self.output_base_dir / "music" / f"bgm_intelligence_{scene_id}.json")
-            emotion_data = self._read_json(self.output_base_dir / "emotions" / f"emotion_{scene_id}.json")
             
-            if not all([face_data, speech_data, bgm_data, emotion_data]):
-                logger.warning(f"Missing multimodal data for {scene_id}, skipping.")
+            if not all([speech_data, bgm_data]):
+                logger.warning(f"Missing speech or BGM data for {scene_id}, skipping.")
                 continue
                 
             speech_intel = speech_data.get("intelligence_results", [{}])[0] if "intelligence_results" in speech_data else speech_data
@@ -68,16 +66,15 @@ class MultimodalFusionProcessor:
             # Formulate the prompt
             prompt = f"""
             You are a Master Cinematic Analyst specializing in Telugu Micro-Dramas.
-            Analyze the following raw multimodal signals for Scene {scene_id} and provide a holistic, combined intelligence score.
+            Analyze the following raw audio/speech signals for Scene {scene_id} and provide a holistic, combined intelligence score.
             
             --- MULTIMODAL SIGNALS ---
             1. Transcript & Speech Delivery: {json.dumps(speech_intel, indent=2)}
-            2. Face & Closeups Timeline: {json.dumps(face_data.get("reaction_timeline", []), indent=2)}
-            3. Emotion & Engagement Timeline: {json.dumps(emotion_data.get("engagement_timeline", []), indent=2)}
-            4. BGM Features: {json.dumps(bgm_data, indent=2)}
+            2. BGM Features: {json.dumps(bgm_data, indent=2)}
             
             --- INSTRUCTIONS ---
-            Provide a holistic analysis. Cross-reference the signals. For example, if BGM peaks at the same time as a sad face and a dramatic line, the scene is highly cinematic.
+            Provide a holistic analysis. Cross-reference the signals. For example, if BGM peaks and Speech delivery intensity is high, it's highly cinematic.
+            Infer the expected visual emotional reaction based purely on the dialogue and the BGM.
             
             Return ONLY a valid JSON object matching this exact schema:
             {{

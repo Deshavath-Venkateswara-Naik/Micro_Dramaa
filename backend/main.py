@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import ingestion, segmentation, audio, speech, face, emotion, bgm, virality, nostalgia, drama, fusion, sequencer, renderer, story
+from fastapi.staticfiles import StaticFiles
+from routers import ingestion, segmentation, audio, speech, bgm, fusion, sequencer, renderer, story
 import uvicorn
 import os
 import logging
@@ -19,16 +20,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Expose local storage directory so the external Subtitle API can download the audio files
+storage_path = os.path.join(os.path.dirname(__file__), "..", "storage")
+app.mount("/storage", StaticFiles(directory=storage_path), name="storage")
+
 app.include_router(ingestion.router, prefix="/api/v1")
 app.include_router(segmentation.router, prefix="/api/v1")
 app.include_router(audio.router, prefix="/api/v1")
 app.include_router(speech.router, prefix="/api/v1")
-app.include_router(face.router, prefix="/api/v1")
-app.include_router(emotion.router, prefix="/api/v1")
 app.include_router(bgm.router, prefix="/api/v1")
-app.include_router(virality.router, prefix="/api/v1")
-app.include_router(nostalgia.router, prefix="/api/v1")
-app.include_router(drama.router, prefix="/api/v1")
 app.include_router(fusion.router, prefix="/api/v1")
 app.include_router(sequencer.router, prefix="/api/v1")
 app.include_router(renderer.router, prefix="/api/v1")

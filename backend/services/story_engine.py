@@ -77,17 +77,31 @@ class StoryIntelligenceEngine:
         else:
             video_duration_formatted = "UNKNOWN"
 
-        # 3. Read the Full Video directly into memory as raw binary data
+        # 3. Upload Full Video to GCS to bypass Gemini 500MB inline limit
         uploaded_files = []
-        logger.info(f"Loading full video {video_path} inline for Gemini...")
+        logger.info(f"Uploading full video {video_path} to GCS for Gemini...")
         
         try:
-            with open(video_path, "rb") as f:
-                video_bytes = f.read()
-            video_part = genai.types.Part.from_bytes(data=video_bytes, mime_type="video/mp4")
+            from google.cloud import storage
+            bucket_name = "videograph-ai-microdrama-assets"
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            
+            blob_name = f"tmp_video/{video_id}_{os.path.basename(video_path)}"
+            blob = bucket.blob(blob_name)
+            
+            # Upload the video to GCS
+            blob.upload_from_filename(video_path)
+            gcs_uri = f"gs://{bucket_name}/{blob_name}"
+            
+            logger.info(f"Video successfully uploaded to {gcs_uri}")
+            
+            # Pass the GCS URI to Gemini
+            video_part = genai.types.Part.from_uri(file_uri=gcs_uri, mime_type="video/mp4")
             uploaded_files.append(video_part)
+            
         except Exception as e:
-            logger.error(f"Failed to load full video {video_path}: {e}")
+            logger.error(f"Failed to upload full video {video_path} to GCS: {e}")
 
         # 4. Prompt Engineering
         system_prompt = """You are an elite OTT microdrama editor, cinematic storytelling analyst, and viral short-form strategist.
@@ -97,8 +111,9 @@ A Micro Drama is a highly condensed, emotionally driven narrative video format (
 
 Your task is to analyze structured entertainment scene data to extract the perfect Micro Drama episodes.
 
-1. DURATION & PACING & EDITING RULES: 
-   - Runtime MUST be strictly between 30 and 90 seconds.
+1. DURATION & PACING & EDITING RULES (STRICTLY ENFORCED): 
+   - Runtime MUST be strictly between 30 and 90 seconds. This is a hard limit.
+   - You must look at the timestamps of the `included_scene_ids` you select. The total time from the first scene's start to the last scene's end MUST NOT exceed 90 seconds! If the story arc is too long, cut it into two separate episodes.
    - As an editor (human or AI), you can:
      * remove unnecessary time
      * skip filler moments
@@ -139,47 +154,28 @@ Your task is to analyze structured entertainment scene data to extract the perfe
 
 --- OUTPUT FORMAT REQUIREMENTS ---
 You MUST respond with ONLY valid, parseable JSON. Do not include markdown formatting like ```json or any prose outside the JSON.
-The JSON must be a list of candidate objects matching this exact schema:
+The JSON must be a raw array of candidate objects matching this exact schema:
 
-{
-  "series_title": "Binge-worthy title for the whole series",
-  "character_graph": {
-    "characters": [
-      { "id": "char_01", "name": "Name/Role", "role": "protagonist/antagonist/etc" }
-    ],
-    "relationships": [
-      {
-        "from": "char_01",
-        "to": "char_02",
-        "type": "parent_child/lovers/rivals/etc",
-        "arc": "betrayal_discovery/etc",
-        "tension": "high/medium/low"
-      }
-    ]
-  },
-  "episodes": [
-    {
-      "episode_number": 1,
-      "episode_title": "string",
-      "start_time": "HH:MM:SS",
-      "end_time": "HH:MM:SS",
-      "duration_seconds": 0,
-      "first_3_second_hook_caption": "string",
-      "emotional_hook_description": "string",
-      "central_conflict_type": "string",
-      "relatable_theme": "string",
-      "dramatic_peak_timestamp": "HH:MM:SS",
-      "cliffhanger_ending_description": "string",
-      "retention_score_0_to_100": 0,
-      "characters_present": ["string"],
-      "virality_and_psychology_analysis": "string",
-      "narrative_role": "setup/escalation/confrontation/peak",
-      "cliffhanger_link": "How this connects to Episode 2"
-    }
-  ]
-}
+[
+  {
+    "binge_worthy_title": "string",
+    "included_scene_ids": ["SC_001", "SC_002"],
+    "start_time": "HH:MM:SS",
+    "end_time": "HH:MM:SS",
+    "duration_seconds": 0,
+    "first_3_second_hook_caption": "string",
+    "emotional_hook_description": "string",
+    "central_conflict_type": "string",
+    "relatable_theme": "string",
+    "dramatic_peak_timestamp": "HH:MM:SS",
+    "cliffhanger_ending_description": "string",
+    "retention_score_0_to_100": 0,
+    "characters_present": ["string"],
+    "virality_and_psychology_analysis": "string"
+  }
+]
 
-Failure to adhere to this JSON schema will result in system failure.
+Failure to adhere to this JSON array schema will result in system failure.
 """
         
         user_prompt = f"""Analyze the provided multimodal intelligence data from a long-form Telugu video.
@@ -201,11 +197,11 @@ Video Metadata:
 Extract ALL valid high-impact microdrama candidates from the provided video.
 Identify every emotionally engaging, suspenseful, retention-optimized narrative window that satisfies the defined microdrama characteristics.
 Do not artificially limit the number of candidates.
-Ensure each candidate is between 30 and 90 seconds.
-Ensure boundaries (start_time/end_time) are frame-accurate, do not cut dialogue mid-sentence, and do not bleed into unrelated scenes.
+CRITICAL DURATION RULE: Each episode MUST strictly be between 30 and 90 seconds. When selecting `included_scene_ids`, manually verify that the total duration does not exceed 90 seconds. Do not create 2-minute or 5-minute episodes. Keep them extremely short and punchy.
+For each episode, you MUST select the exact scene IDs from the SCENE LIST that make up the episode and put them in `included_scene_ids`.
 CRITICAL TIMING RULE: DO NOT hallucinate timestamps! The video is exactly {video_duration_formatted} ({video_duration_sec}s) long. Any timestamp exceeding this limit is physically impossible and will crash the pipeline. All timestamps MUST match exactly with the provided transcript chunks.
 Ensure each candidate ends on a cliffhanger.
-Return strictly the JSON object containing series_title, character_graph, and chronologically ordered episodes as defined in the system prompt. No prose.
+Return strictly the JSON array of chronologically ordered episodes as defined in the system prompt. No prose.
 """
 
         # Build contents array with all uploaded video chunks followed by the user prompt
@@ -231,6 +227,77 @@ Return strictly the JSON object containing series_title, character_graph, and ch
                 
             result_json = json.loads(response_text.strip())
             
+            # Post-process timestamps and enforce strict 30-90s limits via slicing
+            scene_dict = {s["scene_id"]: s for s in scenes}
+            
+            episodes = result_json if isinstance(result_json, list) else result_json.get("episodes", [])
+            final_episodes = []
+            
+            def t_to_s(t):
+                h,m,s = map(float, t.split(':'))
+                return h*3600 + m*60 + s
+            
+            for ep in episodes:
+                included_ids = ep.get("included_scene_ids", [])
+                if not included_ids:
+                    continue
+                    
+                current_chunk_ids = []
+                chunk_start_sec = None
+                part = 1
+                
+                for sid in included_ids:
+                    if sid not in scene_dict:
+                        continue
+                    
+                    scene = scene_dict[sid]
+                    s_start = t_to_s(scene.get("start", "00:00:00"))
+                    s_end = t_to_s(scene.get("end", "00:00:00"))
+                    
+                    if chunk_start_sec is None:
+                        chunk_start_sec = s_start
+                        
+                    # If adding this scene exceeds 90s (and we already have at least 1 scene in chunk)
+                    if (s_end - chunk_start_sec > 90) and len(current_chunk_ids) > 0:
+                        # Flush current chunk
+                        new_ep = dict(ep)
+                        new_ep["included_scene_ids"] = list(current_chunk_ids)
+                        if part > 1 or (s_end - chunk_start_sec > 90): # meaning there will be more parts
+                            new_ep["binge_worthy_title"] = f"{ep.get('binge_worthy_title', 'Episode')} (Part {part})"
+                            
+                        # Calculate exact boundaries for this chunk
+                        c_start = scene_dict[current_chunk_ids[0]].get("start", "00:00:00")
+                        c_end = scene_dict[current_chunk_ids[-1]].get("end", "00:00:00")
+                        new_ep["start_time"] = c_start
+                        new_ep["end_time"] = c_end
+                        new_ep["duration_seconds"] = int(t_to_s(c_end) - t_to_s(c_start))
+                        
+                        final_episodes.append(new_ep)
+                        
+                        # Reset for next chunk
+                        current_chunk_ids = [sid]
+                        chunk_start_sec = s_start
+                        part += 1
+                    else:
+                        current_chunk_ids.append(sid)
+                        
+                # Flush remaining scenes
+                if current_chunk_ids:
+                    new_ep = dict(ep)
+                    new_ep["included_scene_ids"] = list(current_chunk_ids)
+                    if part > 1:
+                        new_ep["binge_worthy_title"] = f"{ep.get('binge_worthy_title', 'Episode')} (Part {part})"
+                        
+                    c_start = scene_dict[current_chunk_ids[0]].get("start", "00:00:00")
+                    c_end = scene_dict[current_chunk_ids[-1]].get("end", "00:00:00")
+                    new_ep["start_time"] = c_start
+                    new_ep["end_time"] = c_end
+                    new_ep["duration_seconds"] = int(t_to_s(c_end) - t_to_s(c_start))
+                    
+                    final_episodes.append(new_ep)
+            
+            result_json = final_episodes
+                    
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             result_json = {"error": str(e)}
