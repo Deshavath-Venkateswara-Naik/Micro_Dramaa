@@ -88,8 +88,8 @@ class EpisodicSequencingEngine:
         
         STAGE 4 SEQUENCING RULES:
         1. Character Graph: Identify characters and their relationships based on the text.
-        2. Filter & Order: Group candidates by shared arcs. Order them logically: setup -> escalation -> confrontation -> peak -> unresolved.
-        3. Episodes: Assign sequential episode numbers.
+        2. Filter & Chronological Ordering (CRITICAL): Group candidates by shared arcs, but you MUST order the episodes strictly in chronological order based on their start_time. Never jump backward in time. (e.g., Episode 5 MUST have a start_time that occurs after Episode 4).
+        3. Episodes: Assign sequential episode numbers based on the chronological timeline.
         4. Cliffhanger Linking: Ensure the cliffhanger of Episode N naturally leads into the hook of Episode N+1.
         
         Provide your analysis ONLY as a valid JSON object matching this exact schema:
@@ -113,7 +113,9 @@ class EpisodicSequencingEngine:
                 {{
                     "episode_number": 1,
                     "episode_title": "Title",
-                    "candidate_reference": "Include candidate start_time or hook description so we know which clip to use",
+                    "candidate_reference": "Description of the clip",
+                    "start_time": "HH:MM:SS",
+                    "end_time": "HH:MM:SS",
                     "narrative_role": "setup/escalation/confrontation/peak",
                     "cliffhanger_link": "How this connects to Episode 2"
                 }}
@@ -126,7 +128,8 @@ class EpisodicSequencingEngine:
                 model="gemini-2.5-pro",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
-                    temperature=0.7
+                    temperature=0.7,
+                    response_mime_type="application/json"
                 )
             )
             

@@ -2,8 +2,8 @@ import os
 import json
 import logging
 from pathlib import Path
+from moviepy.editor import VideoFileClip
 from google import genai
-from google.cloud import storage
 from services.video_chunker import VideoChunker
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,6 @@ class StoryIntelligenceEngine:
                 project=self.project_id, 
                 location=self.location
             )
-            self.storage_client = storage.Client(project=self.project_id)
-            self.gcs_bucket_name = "videograph-ai-microdrama-assets"
         except Exception as e:
             logger.warning(f"Failed to init GenAI client: {e}")
             self.llm_client = None
@@ -94,30 +92,30 @@ class StoryIntelligenceEngine:
             d_data = self._read_json(self.output_base_dir / "drama" / f"drama_score_{scene_id}.json")
             if d_data: drama_data_list.append(d_data)
 
-        # 3. Upload Video Chunks to GCS and pass as URI for Vertex AI
+        # Get video duration to prevent hallucinations
+        try:
+            with VideoFileClip(video_path) as clip:
+                video_duration_sec = clip.duration
+        except Exception as e:
+            logger.warning(f"Could not get video duration: {e}")
+            video_duration_sec = 0
+            
+        if video_duration_sec > 0:
+            video_duration_formatted = f"{int(video_duration_sec//3600):02d}:{int((video_duration_sec%3600)//60):02d}:{int(video_duration_sec%60):02d}"
+        else:
+            video_duration_formatted = "UNKNOWN"
+
+        # 3. Read the Full Video directly into memory as raw binary data
         uploaded_files = []
-        logger.info("Uploading video chunks to GCS for Gemini Vertex AI...")
+        logger.info(f"Loading full video {video_path} inline for Gemini...")
         
         try:
-            bucket = self.storage_client.bucket(self.gcs_bucket_name)
+            with open(video_path, "rb") as f:
+                video_bytes = f.read()
+            video_part = genai.types.Part.from_bytes(data=video_bytes, mime_type="video/mp4")
+            uploaded_files.append(video_part)
         except Exception as e:
-            logger.error(f"Failed to access GCS bucket: {e}")
-            bucket = None
-            
-        for chunk_path in chunk_paths:
-            try:
-                if bucket:
-                    blob_name = f"{video_id}/{Path(chunk_path).name}"
-                    blob = bucket.blob(blob_name)
-                    blob.upload_from_filename(chunk_path)
-                    gcs_uri = f"gs://{self.gcs_bucket_name}/{blob_name}"
-                    part = genai.types.Part.from_uri(file_uri=gcs_uri, mime_type="video/mp4")
-                    uploaded_files.append(part)
-                    logger.info(f"Uploaded and linked {chunk_path} as {gcs_uri}")
-                else:
-                    logger.warning("GCS Bucket not available, skipping video upload.")
-            except Exception as e:
-                logger.error(f"Failed to upload video chunk {chunk_path}: {e}")
+            logger.error(f"Failed to load full video {video_path}: {e}")
 
         # 4. Prompt Engineering
         system_prompt = """You are an elite OTT microdrama editor, cinematic storytelling analyst, and viral short-form strategist.
@@ -193,6 +191,7 @@ Identify the BEST microdrama candidates based on the defined characteristics.
 Video Metadata:
 - Job ID: {video_id}
 - Language: Telugu
+- Total Duration: {video_duration_formatted} ({video_duration_sec} seconds)
 
 --- MULTIMODAL INTELLIGENCE DATA ---
 1. SCENE LIST:
@@ -226,6 +225,7 @@ Identify every emotionally engaging, suspenseful, retention-optimized narrative 
 Do not artificially limit the number of candidates.
 Ensure each candidate is between 30 and 90 seconds.
 Ensure boundaries (start_time/end_time) are frame-accurate, do not cut dialogue mid-sentence, and do not bleed into unrelated scenes.
+CRITICAL TIMING RULE: DO NOT hallucinate timestamps! The video is exactly {video_duration_formatted} ({video_duration_sec}s) long. Any timestamp exceeding this limit is physically impossible and will crash the pipeline. All timestamps MUST match exactly with the provided transcript chunks.
 Ensure each candidate ends on a cliffhanger.
 Return strictly the JSON array as defined in the system prompt. No prose.
 """
@@ -233,14 +233,15 @@ Return strictly the JSON array as defined in the system prompt. No prose.
         # Build contents array with all uploaded video chunks followed by the user prompt
         contents = uploaded_files + [user_prompt]
 
-        logger.info("Sending data to Gemini 2.0 Flash...")
+        logger.info("Sending data to gemini-2.5-flash-lite...")
         try:
             response = self.llm_client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash-lite",
                 contents=contents,
                 config=genai.types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    temperature=0.7
+                    temperature=0.7,
+                    response_mime_type="application/json"
                 )
             )
             
