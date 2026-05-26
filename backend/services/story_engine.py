@@ -57,12 +57,20 @@ class StoryIntelligenceEngine:
         # 2. Gather all Data
         scene_list_data = scenes
         fusion_data = []
+        transcript_data = []
+        bgm_data = []
         
         for scene in scenes:
             scene_id = scene.get("scene_id")
             
             f_data = self._read_json(self.output_base_dir / "fusion" / f"multimodal_intelligence_{scene_id}.json")
             if f_data: fusion_data.append(f_data)
+            
+            t_data = self._read_json(self.output_base_dir / "speech" / f"transcript_{scene_id}.json")
+            if t_data: transcript_data.append(t_data)
+            
+            b_data = self._read_json(self.output_base_dir / "music" / f"bgm_intelligence_{scene_id}.json")
+            if b_data: bgm_data.append(b_data)
 
         # Get video duration to prevent hallucinations
         try:
@@ -192,6 +200,12 @@ Video Metadata:
 
 2. MULTIMODAL FUSION INTELLIGENCE:
 {json.dumps(fusion_data, indent=2)}
+
+3. TRANSCRIPT DATA:
+{json.dumps(transcript_data, indent=2)}
+
+4. RAW BGM INTELLIGENCE DATA:
+{json.dumps(bgm_data, indent=2)}
 
 --- INSTRUCTIONS ---
 Extract ALL valid high-impact microdrama candidates from the provided video.
