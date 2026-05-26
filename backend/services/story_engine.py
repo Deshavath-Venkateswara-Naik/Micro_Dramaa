@@ -211,7 +211,7 @@ Video Metadata:
 Extract ALL valid high-impact microdrama candidates from the provided video.
 Identify every emotionally engaging, suspenseful, retention-optimized narrative window that satisfies the defined microdrama characteristics.
 Do not artificially limit the number of candidates.
-CRITICAL DURATION RULE: Each episode MUST strictly be between 30 and 90 seconds. When selecting `included_scene_ids`, manually verify that the total duration does not exceed 90 seconds. Do not create 2-minute or 5-minute episodes. Keep them extremely short and punchy.
+CRITICAL DURATION RULE: Each episode MUST strictly be between 30 and 100 seconds. When selecting `included_scene_ids`, manually verify that the total duration does not exceed 100 seconds. Do not create 2-minute or 5-minute episodes. Keep them extremely short and punchy.
 For each episode, you MUST select the exact scene IDs from the SCENE LIST that make up the episode and put them in `included_scene_ids`.
 CRITICAL TIMING RULE: DO NOT hallucinate timestamps! The video is exactly {video_duration_formatted} ({video_duration_sec}s) long. Any timestamp exceeding this limit is physically impossible and will crash the pipeline. All timestamps MUST match exactly with the provided transcript chunks.
 Ensure each candidate ends on a cliffhanger.
@@ -241,7 +241,7 @@ Return strictly the JSON array of chronologically ordered episodes as defined in
                 
             result_json = json.loads(response_text.strip())
             
-            # Post-process timestamps and enforce strict 30-90s limits via slicing
+            # Post-process timestamps and enforce strict 30-100s limits via slicing
             scene_dict = {s["scene_id"]: s for s in scenes}
             
             episodes = result_json if isinstance(result_json, list) else result_json.get("episodes", [])
@@ -271,12 +271,12 @@ Return strictly the JSON array of chronologically ordered episodes as defined in
                     if chunk_start_sec is None:
                         chunk_start_sec = s_start
                         
-                    # If adding this scene exceeds 90s (and we already have at least 1 scene in chunk)
-                    if (s_end - chunk_start_sec > 90) and len(current_chunk_ids) > 0:
+                    # If adding this scene exceeds 100s (and we already have at least 1 scene in chunk)
+                    if (s_end - chunk_start_sec > 100) and len(current_chunk_ids) > 0:
                         # Flush current chunk
                         new_ep = dict(ep)
                         new_ep["included_scene_ids"] = list(current_chunk_ids)
-                        if part > 1 or (s_end - chunk_start_sec > 90): # meaning there will be more parts
+                        if part > 1 or (s_end - chunk_start_sec > 100): # meaning there will be more parts
                             new_ep["binge_worthy_title"] = f"{ep.get('binge_worthy_title', 'Episode')} (Part {part})"
                             
                         # Calculate exact boundaries for this chunk
