@@ -1,4 +1,3 @@
-import os
 import logging
 from pathlib import Path
 from fastapi import APIRouter, HTTPException

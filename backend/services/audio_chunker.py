@@ -1,4 +1,3 @@
-import os
 import logging
 from pathlib import Path
 from pydub import AudioSegment
@@ -10,13 +9,13 @@ class AudioChunker:
         self.chunk_dir = chunk_dir
         self.chunk_dir.mkdir(parents=True, exist_ok=True)
         
-    def chunk_audio(self, audio_path: str, scene_id: str, max_duration_ms: int = 28000) -> list:
+    def chunk_audio(self, audio_path: str, shot_id: str, max_duration_ms: int = 28000) -> list:
         """
         Splits audio intelligently to ensure no chunk exceeds max_duration_ms (28s).
         It searches backward for the quietest moment (silence) to avoid cutting words in half.
         Returns a list of metadata for each chunk containing the global offset.
         """
-        logger.info(f"Chunking audio for {scene_id} at {audio_path}")
+        logger.info(f"Chunking audio for {shot_id} at {audio_path}")
         
         try:
             audio = AudioSegment.from_wav(audio_path)
@@ -62,11 +61,11 @@ class AudioChunker:
                 
             # Extract and save chunk
             chunk_audio = audio[current_start:actual_end]
-            chunk_path = self.chunk_dir / f"{scene_id}_chunk_{chunk_idx:03d}.wav"
+            chunk_path = self.chunk_dir / f"{shot_id}_chunk_{chunk_idx:03d}.wav"
             chunk_audio.export(str(chunk_path), format="wav")
             
             chunks_meta.append({
-                "chunk_id": f"{scene_id}_CHK{chunk_idx:02d}",
+                "chunk_id": f"{shot_id}_CHK{chunk_idx:02d}",
                 "file_path": str(chunk_path),
                 "global_offset_ms": current_start,
                 "duration_ms": actual_end - current_start
@@ -75,5 +74,5 @@ class AudioChunker:
             current_start = actual_end
             chunk_idx += 1
             
-        logger.info(f"Generated {len(chunks_meta)} chunks for {scene_id}")
+        logger.info(f"Generated {len(chunks_meta)} chunks for {shot_id}")
         return chunks_meta

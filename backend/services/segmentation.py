@@ -1,10 +1,7 @@
-import os
-import json
 import logging
 from typing import List, Dict, Any
 from scenedetect import detect, ContentDetector
 import librosa
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +22,10 @@ class VisualSegmenter:
             for i, scene in enumerate(scene_list):
                 scenes.append({
                     "shot_id": i + 1,
-                    "start_time": scene[0].get_seconds(),
-                    "end_time": scene[1].get_seconds()
+                    "start_time": scene[0].get_timecode(),
+                    "end_time": scene[1].get_timecode(),
+                    "start_frame": scene[0].get_frames(),
+                    "end_frame": scene[1].get_frames()
                 })
             return scenes
         except Exception as e:
@@ -92,7 +91,7 @@ class SemanticFusionEngine:
     """Fuses visual cuts and audio contexts into Cinematic Boundaries."""
     
     @staticmethod
-    def fuse(visual_shots: List[Dict[str, float]], audio_silences: List[Dict[str, float]]) -> List[Dict[str, Any]]:
+    def fuse(visual_shots: List[Dict[str, float]], audio_silences: List[Dict[str, float]], video_duration: float = 2.0) -> List[Dict[str, Any]]:
         """
         Evaluates each visual cut. If the visual cut aligns with an audio silence,
         it receives a high 'boundary_score', meaning it's a good place for a scene break.
@@ -101,17 +100,15 @@ class SemanticFusionEngine:
         
         if not visual_shots:
             # If no cuts were detected, treat the whole video as a single scene
-            duration = 0.0
+            duration = video_duration
             if audio_silences and audio_silences[-1]["end_time"] > 0:
-                duration = audio_silences[-1]["end_time"]
-            else:
-                duration = 2.0 # fallback
+                duration = max(duration, audio_silences[-1]["end_time"])
                 
             return [{
-                "scene_id": "SC_001",
+                "shot_id": "SH_001",
                 "start": "00:00:00",
                 "end": SemanticFusionEngine._format_time(duration),
-                "scene_type": "continuous_action",
+                "shot_type": "continuous_action",
                 "boundary_score": 1.0,
                 "dramatic_pause_detected": False,
                 "music_transition": False
@@ -123,7 +120,12 @@ class SemanticFusionEngine:
         current_scene_start = 0.0
         
         for i, shot in enumerate(visual_shots):
-            cut_time = shot["end_time"]
+            cut_time_val = shot["end_time"]
+            if isinstance(cut_time_val, str):
+                h, m, s = cut_time_val.split(":")
+                cut_time = int(h) * 3600 + int(m) * 60 + float(s)
+            else:
+                cut_time = float(cut_time_val)
             
             # Check if this cut aligns with any silence
             aligned_silence = None
@@ -154,10 +156,10 @@ class SemanticFusionEngine:
                 end_str = SemanticFusionEngine._format_time(cut_time)
                 
                 scenes.append({
-                    "scene_id": f"SC_{len(scenes) + 1:03d}",
+                    "shot_id": f"SH_{len(scenes) + 1:03d}",
                     "start": start_str,
                     "end": end_str,
-                    "scene_type": "emotional_dialogue" if dramatic_pause else "action_dialogue",
+                    "shot_type": "emotional_dialogue" if dramatic_pause else "action_dialogue",
                     "boundary_score": round(boundary_score, 2),
                     "dramatic_pause_detected": dramatic_pause,
                     "music_transition": False # Placeholder for advanced music detection
@@ -184,18 +186,30 @@ class SegmentationService:
         # 1. Visual Node
         shots = VisualSegmenter.detect_scenes(video_path)
         
+        from .storage import StorageService
+        StorageService.save_json(video_id, "shots.json", {"shots": shots})
+        
         # 2. Audio Node (If audio is not extracted yet, we use the video file and librosa handles it)
         if not audio_path:
             audio_path = video_path
             
         silences = AudioSegmenter.detect_silences(audio_path)
         
+        # Get actual video duration for fallback
+        try:
+            from moviepy.editor import VideoFileClip
+            with VideoFileClip(video_path) as clip:
+                video_duration = clip.duration
+        except Exception as e:
+            logger.warning(f"Failed to get video duration: {e}")
+            video_duration = 2.0
+            
         # 3. Fusion Node
-        cinematic_scenes = SemanticFusionEngine.fuse(shots, silences)
+        cinematic_scenes = SemanticFusionEngine.fuse(shots, silences, video_duration)
         
         return {
             "video_id": video_id,
             "total_shots_detected": len(shots),
-            "total_cinematic_scenes": len(cinematic_scenes),
-            "scenes": cinematic_scenes
+            "total_cinematic_shots": len(cinematic_scenes),
+            "shots": cinematic_scenes
         }

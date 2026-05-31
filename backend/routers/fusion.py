@@ -1,4 +1,3 @@
-import os
 import logging
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -23,7 +22,7 @@ async def process_fusion(request: FusionProcessRequest):
     Combines outputs from Speech, Emotion, Face, and BGM processors into a single LLM call per scene.
     """
     try:
-        video_path = Path(request.video_path)
+        # We receive video_path in request but don't strictly need it to find output_dir
         metadata_path = Path(request.scene_metadata_path)
         
         if not metadata_path.exists():

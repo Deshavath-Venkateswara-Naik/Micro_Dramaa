@@ -1,4 +1,3 @@
-import os
 import subprocess
 import json
 import logging
@@ -23,18 +22,18 @@ class VideoChunker:
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
             
-        scenes = metadata.get("scenes", [])
+        shots = metadata.get("shots", [])
         chunk_paths = []
         
-        for scene in scenes:
-            scene_id = scene.get("scene_id")
-            start_time = scene.get("start")
-            end_time = scene.get("end")
+        for shot in shots:
+            shot_id = shot.get("shot_id")
+            start_time = shot.get("start") or shot.get("start_time")
+            end_time = shot.get("end") or shot.get("end_time")
             
-            if not all([scene_id, start_time, end_time]):
+            if not all([shot_id, start_time, end_time]):
                 continue
                 
-            output_chunk = self.chunks_dir / f"chunk_{scene_id}.mp4"
+            output_chunk = self.chunks_dir / f"chunk_{shot_id}.mp4"
             
             if output_chunk.exists():
                 chunk_paths.append(str(output_chunk))
@@ -54,8 +53,8 @@ class VideoChunker:
             try:
                 subprocess.run(cmd, check=True, capture_output=True)
                 chunk_paths.append(str(output_chunk))
-                logger.info(f"Extracted video chunk for {scene_id}")
+                logger.info(f"Extracted video chunk for {shot_id}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"FFmpeg extraction failed for {scene_id}: {e.stderr.decode()}")
+                logger.error(f"FFmpeg extraction failed for {shot_id}: {e.stderr.decode()}")
                 
         return chunk_paths

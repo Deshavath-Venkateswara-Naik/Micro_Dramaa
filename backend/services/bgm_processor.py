@@ -37,19 +37,19 @@ class BgmIntelligenceProcessor:
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
             
-        scenes = metadata.get("scenes", [])
+        shots = metadata.get("shots", [])
         intelligence_results = []
         
-        for scene in scenes:
-            scene_id = scene.get("scene_id")
+        for shot in shots:
+            shot_id = shot.get("shot_id")
             
-            bgm_path = self.output_base_dir / "audio" / "bgm" / f"bgm_{scene_id}.wav"
+            bgm_path = self.output_base_dir / "audio" / "bgm" / f"bgm_{shot_id}.wav"
             if not bgm_path.exists():
-                logger.warning(f"BGM audio not found for {scene_id}, skipping.")
+                logger.warning(f"BGM audio not found for {shot_id}, skipping.")
                 continue
                 
             # Read Stage 6 output
-            emotion_path = self.output_base_dir / "emotions" / f"emotion_{scene_id}.json"
+            emotion_path = self.output_base_dir / "emotions" / f"emotion_{shot_id}.json"
             emotion_data = {}
             if emotion_path.exists():
                 with open(emotion_path, 'r') as f:
@@ -60,7 +60,7 @@ class BgmIntelligenceProcessor:
             
             # 2. LLM Prompting for Music Curve Classification
             music_output = self._extract_music_curve(
-                scene_id, music_features, emotion_data
+                shot_id, music_features, emotion_data
             )
             
             if isinstance(music_output, list) and len(music_output) > 0:
@@ -70,7 +70,7 @@ class BgmIntelligenceProcessor:
             
             scene_payload = music_output
             
-            out_path = self.music_dir / f"bgm_intelligence_{scene_id}.json"
+            out_path = self.music_dir / f"bgm_intelligence_{shot_id}.json"
             with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(scene_payload, f, indent=4, ensure_ascii=False)
                 
@@ -120,12 +120,12 @@ class BgmIntelligenceProcessor:
             # Essentia Processing
             try:
                 audio_es = es.MonoLoader(filename=audio_path, sampleRate=22050)()
-                dyn_comp, loudness = es.DynamicComplexity()(audio_es)
+                dyn_comp, _ = es.DynamicComplexity()(audio_es)
                 rhythm_extractor = es.RhythmExtractor2013(method='multifeature')
                 bpm, _, _, _, _ = rhythm_extractor(audio_es)
             except Exception as e:
                 logger.error(f"Essentia failed: {e}")
-                dyn_comp, loudness, bpm = 0, 0, 0
+                dyn_comp, bpm = 0, 0
 
             # Spectral Centroid (High = Violins/Vocals, Low = Drums/Bass)
             centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
@@ -152,6 +152,6 @@ class BgmIntelligenceProcessor:
             logger.error(f"Error analyzing audio {audio_path}: {e}")
             return {}
 
-    def _extract_music_curve(self, scene_id, music_features, emotion_data):
+    def _extract_music_curve(self, shot_id, music_features, emotion_data):
         # We now just return the raw features for Multimodal Fusion
         return music_features

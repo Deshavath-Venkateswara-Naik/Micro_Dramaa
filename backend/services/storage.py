@@ -35,3 +35,18 @@ class StorageService:
         video_dir = os.path.join(STORAGE_DIR, video_id)
         os.makedirs(video_dir, exist_ok=True)
         return os.path.join(video_dir, "standardized_video.mp4")
+
+    @staticmethod
+    def save_json(video_id: str, filename: str, data: dict) -> str:
+        """
+        Saves a JSON dictionary to the video's storage directory.
+        """
+        import json
+        video_dir = os.path.join(STORAGE_DIR, video_id)
+        os.makedirs(video_dir, exist_ok=True)
+        
+        file_path = os.path.join(video_dir, filename)
+        with open(file_path, "w") as f:
+            json.dump(data, f, indent=2)
+            
+        return file_path

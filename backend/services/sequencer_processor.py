@@ -39,24 +39,10 @@ class EpisodicSequencingEngine:
         with open(story_candidates_path, 'r') as f:
             story_data = json.load(f)
             
-        candidates = story_data.get("microdrama_candidates", [])
-        
-        # Load all transcripts for context
+        # Metadata validation
         metadata_path = Path(scene_metadata_path)
         if not metadata_path.exists():
             return {"error": "Metadata not found"}
-            
-        with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
-            
-        scenes = metadata.get("scenes", [])
-        transcript_data = []
-        for scene in scenes:
-            scene_id = scene.get("scene_id")
-            t_path = self.output_base_dir / "speech" / f"transcript_{scene_id}.json"
-            if t_path.exists():
-                with open(t_path, 'r') as f:
-                    transcript_data.append(json.load(f))
                     
         # Extract episodic sequencing logic
         logger.info("Extracting episodic sequencing from Story Engine candidates...")

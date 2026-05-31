@@ -24,15 +24,17 @@ async def process_speech(request: SpeechProcessRequest):
     
     try:
         processor = SpeechProcessor(output_base_dir=output_dir)
-        results = processor.process_speech(request.video_path, request.scene_metadata_path)
+        
+        # Trigger the global dialogue extraction and diarization
+        results = processor.process_speech(request.video_id, request.video_path)
         logger.info(f"Successfully processed speech for {request.video_id}")
         
         return {
             "status": "completed",
             "message": f"Stage 4 Speech Intelligence completed for {request.video_id}",
             "output_dir": output_dir,
-            "processed_scenes": len(results),
-            "intelligence_results": results
+            "diarization_available": len(results.get("dialogues", [])) > 0,
+            "results": results
         }
     except Exception as e:
         logger.error(f"Error processing speech for {request.video_id}: {str(e)}")

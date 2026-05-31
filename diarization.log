@@ -1,0 +1,14 @@
+INFO:services.speech_processor:Transcribing global dialogue: /home/venkateswara/Micro_Drama/storage/MOV_993D77C0/audio/dialogue/global_dialogue.wav
+INFO:services.speech_processor:Found existing merged STT results at /home/venkateswara/Micro_Drama/storage/MOV_993D77C0/audio/chunks/MOV_993D77C0_global_final_merged.json. Skipping Sarvam API calls.
+INFO:services.speech_processor:Aligning Sarvam chunk transcripts to get word-level timestamps using WhisperX...
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1780122186.925130    6952 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1780122186.976866    6952 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX_VNNI AVX_VNNI_INT8 AVX_NE_CONVERT FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1780122188.568727    6952 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+/home/venkateswara/Micro_Drama/backend/venv/lib/python3.12/site-packages/transformers/configuration_utils.py:335: UserWarning: Passing `gradient_checkpointing` to a config initialization is deprecated and will be removed in v5 Transformers. Using `model.gradient_checkpointing_enable()` instead, or if you are using the `Trainer` API, pass `gradient_checkpointing=True` in your `TrainingArguments`.
+  warnings.warn(
+INFO:services.speech_processor:Running Pyannote Speaker Diarization pipeline...
+Starting speech processing...
+2026-05-30 13:05:52 - whisperx.diarize - INFO - Loading diarization model: pyannote/speaker-diarization-community-1

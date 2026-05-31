@@ -47,18 +47,18 @@ class MultimodalFusionProcessor:
         with open(metadata_path, 'r') as f:
             metadata = json.load(f)
             
-        scenes = metadata.get("scenes", [])
+        shots = metadata.get("shots", [])
         intelligence_results = []
         
-        for scene in scenes:
-            scene_id = scene.get("scene_id")
+        for shot in shots:
+            shot_id = shot.get("shot_id")
             
             # Read Stage outputs
-            speech_data = self._read_json(self.output_base_dir / "speech" / f"transcript_{scene_id}.json")
-            bgm_data = self._read_json(self.output_base_dir / "music" / f"bgm_intelligence_{scene_id}.json")
+            speech_data = self._read_json(self.output_base_dir / "speech" / f"transcript_{shot_id}.json")
+            bgm_data = self._read_json(self.output_base_dir / "music" / f"bgm_intelligence_{shot_id}.json")
             
             if not all([speech_data, bgm_data]):
-                logger.warning(f"Missing speech or BGM data for {scene_id}, skipping.")
+                logger.warning(f"Missing speech or BGM data for {shot_id}, skipping.")
                 continue
                 
             speech_intel = speech_data.get("intelligence_results", [{}])[0] if "intelligence_results" in speech_data else speech_data
@@ -66,7 +66,7 @@ class MultimodalFusionProcessor:
             # Formulate the prompt
             prompt = f"""
             You are a Master Cinematic Analyst specializing in Telugu Micro-Dramas.
-            Analyze the following raw audio/speech signals for Scene {scene_id} and provide a holistic, combined intelligence score.
+            Analyze the following raw audio/speech signals for Scene {shot_id} and provide a holistic, combined intelligence score.
             
             --- MULTIMODAL SIGNALS ---
             1. Transcript & Speech Delivery: {json.dumps(speech_intel, indent=2)}
@@ -109,15 +109,15 @@ class MultimodalFusionProcessor:
                     response_text = response_text[:-3]
                     
                 scene_payload = json.loads(response_text.strip())
-                scene_payload["scene_id"] = scene_id
+                scene_payload["shot_id"] = shot_id
                 
-                out_path = self.fusion_dir / f"multimodal_intelligence_{scene_id}.json"
+                out_path = self.fusion_dir / f"multimodal_intelligence_{shot_id}.json"
                 with open(out_path, 'w', encoding='utf-8') as f:
                     json.dump(scene_payload, f, indent=4, ensure_ascii=False)
                     
                 intelligence_results.append(scene_payload)
             except Exception as e:
-                logger.error(f"Fusion LLM failed for {scene_id}: {e}")
+                logger.error(f"Fusion LLM failed for {shot_id}: {e}")
 
         # Save master JSON
         master_payload = {

@@ -10,7 +10,6 @@ from transformers import pipeline
 
 try:
     import torch
-    import torchaudio
     from demucs.apply import apply_model
     from demucs.pretrained import get_model
     DEMUCS_AVAILABLE = True
@@ -48,27 +47,27 @@ class AudioProcessor:
         with open(scene_metadata_path, 'r') as f:
             metadata = json.load(f)
 
-        scenes = metadata.get("scenes", [])
+        shots = metadata.get("shots", [])
         extracted_paths = []
 
         audio_dir = self.output_base_dir / "audio" / "raw"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        for scene in scenes:
-            scene_id = scene.get("scene_id")
-            start_time = scene.get("start")
-            end_time = scene.get("end")
+        for shot in shots:
+            shot_id = shot.get("shot_id")
+            start_time = shot.get("start") or shot.get("start_time")
+            end_time = shot.get("end") or shot.get("end_time")
             
-            if not all([scene_id, start_time, end_time]):
-                logger.warning(f"Missing metadata for scene: {scene}")
+            if not all([shot_id, start_time, end_time]):
+                logger.warning(f"Missing metadata for scene: {shot}")
                 continue
 
             # Skip 0 second scenes to prevent FFmpeg crashes
             if start_time == end_time:
-                logger.warning(f"Skipping {scene_id} because start and end times are identical ({start_time}).")
+                logger.warning(f"Skipping {shot_id} because start and end times are identical ({start_time}).")
                 continue
 
-            output_audio = audio_dir / f"{scene_id}_raw.wav"
+            output_audio = audio_dir / f"{shot_id}_raw.wav"
             
             # Extract 48kHz, 24-bit audio using FFmpeg
             cmd = [
@@ -86,12 +85,12 @@ class AudioProcessor:
             try:
                 subprocess.run(cmd, check=True, capture_output=True)
                 extracted_paths.append({
-                    "scene_id": scene_id,
+                    "shot_id": shot_id,
                     "path": str(output_audio)
                 })
-                logger.info(f"Extracted audio for {scene_id}")
+                logger.info(f"Extracted audio for {shot_id}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"FFmpeg extraction failed for {scene_id}: {e.stderr.decode()}")
+                logger.error(f"FFmpeg extraction failed for {shot_id}: {e.stderr.decode()}")
 
         return extracted_paths
 
@@ -128,7 +127,7 @@ class AudioProcessor:
         
         return restored_path
 
-    def separate_sources(self, audio_path: str, scene_id: str) -> dict:
+    def separate_sources(self, audio_path: str, shot_id: str) -> dict:
         """Separates audio into Dialogue, BGM, and Effects using Demucs."""
         out_paths = {
             "dialogue": None,
@@ -144,7 +143,7 @@ class AudioProcessor:
         if not DEMUCS_AVAILABLE:
             logger.warning("Demucs not installed, mocking source separation.")
             for stem in out_paths.keys():
-                path = str(base_dir / stem / f"{stem}_{scene_id}.wav")
+                path = str(base_dir / stem / f"{stem}_{shot_id}.wav")
                 subprocess.run(["cp", audio_path, path])
                 out_paths[stem] = path
             return out_paths
@@ -177,10 +176,10 @@ class AudioProcessor:
         effects = other * 0.5
         ambience = drums * 0.2 + other * 0.3
         
-        out_paths["dialogue"] = str(base_dir / "dialogue" / f"dialogue_{scene_id}.wav")
-        out_paths["bgm"] = str(base_dir / "bgm" / f"bgm_{scene_id}.wav")
-        out_paths["effects"] = str(base_dir / "effects" / f"effects_{scene_id}.wav")
-        out_paths["ambience"] = str(base_dir / "ambience" / f"amb_{scene_id}.wav")
+        out_paths["dialogue"] = str(base_dir / "dialogue" / f"dialogue_{shot_id}.wav")
+        out_paths["bgm"] = str(base_dir / "bgm" / f"bgm_{shot_id}.wav")
+        out_paths["effects"] = str(base_dir / "effects" / f"effects_{shot_id}.wav")
+        out_paths["ambience"] = str(base_dir / "ambience" / f"amb_{shot_id}.wav")
         
         sf.write(out_paths["dialogue"], dialogue.transpose(0, 1).numpy(), sr)
         sf.write(out_paths["bgm"], bgm.transpose(0, 1).numpy(), sr)
@@ -189,7 +188,7 @@ class AudioProcessor:
         
         return out_paths
 
-    def extract_cinematic_features(self, stems: dict, scene_id: str) -> dict:
+    def extract_cinematic_features(self, stems: dict, shot_id: str) -> dict:
         """Analyzes stems to extract emotion and cinematic features."""
         try:
             bgm_y, sr = librosa.load(stems["bgm"], sr=22050)
@@ -220,10 +219,10 @@ class AudioProcessor:
                     vocal_emotion_detected = label_map.get(top_pred["label"], "neutral")
                     vocal_emotion_confidence = round(float(top_pred["score"]), 2)
             except Exception as e:
-                logger.error(f"SER failed for {scene_id}: {e}")
+                logger.error(f"SER failed for {shot_id}: {e}")
 
         features = {
-            "scene_id": scene_id,
+            "shot_id": shot_id,
             "dialogue_path": stems["dialogue"],
             "bgm_path": stems["bgm"],
             "effects_path": stems["effects"],
@@ -241,7 +240,7 @@ class AudioProcessor:
         
         base_dir = self.output_base_dir / "audio" / "features"
         base_dir.mkdir(parents=True, exist_ok=True)
-        out_path = base_dir / f"features_{scene_id}.json"
+        out_path = base_dir / f"features_{shot_id}.json"
         
         with open(out_path, 'w') as f:
             json.dump(features, f, indent=4)
@@ -256,19 +255,19 @@ class AudioProcessor:
         results = []
         
         for chunk in extracted_chunks:
-            scene_id = chunk["scene_id"]
+            shot_id = chunk["shot_id"]
             raw_path = chunk["path"]
             
-            logger.info(f"Processing scene {scene_id}...")
+            logger.info(f"Processing scene {shot_id}...")
             
             # 1. Restoration
             restored_path = self.apply_restoration(raw_path)
             
             # 2. Source Separation
-            stems = self.separate_sources(restored_path, scene_id)
+            stems = self.separate_sources(restored_path, shot_id)
             
             # 3. Feature Extraction
-            features = self.extract_cinematic_features(stems, scene_id)
+            features = self.extract_cinematic_features(stems, shot_id)
             results.append(features)
             
         return results
