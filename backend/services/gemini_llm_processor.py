@@ -350,15 +350,19 @@ class GeminiLLMProcessor:
         """One cheap text-only call to summarize the whole film from scene labels."""
         if not self.llm_client or not scenes:
             return ""
-        # Use only the lightweight descriptions, not the full transcript, to stay cheap.
+        # Include timestamps so the LLM understands pacing and time frames.
         outline = [{"scene": s["scene_number"],
+                    "start_time": s.get("start_time", ""),
+                    "end_time": s.get("end_time", ""),
                     "setting": s.get("setting", ""),
                     "summary": s.get("description", "")} for s in scenes]
         try:
             resp = self.llm_client.models.generate_content(
                 model="gemini-2.5-flash-lite",
-                contents=("Write a detailed plot summary of this film based on its "
-                          "ordered scene outline. Respond with plain prose only.\n"
+                contents=("Write a highly detailed and accurate plot summary of this film based on its "
+                          "ordered scene outline. CRITICAL INSTRUCTION: The overall plot of the movie is extremely important! "
+                          "Give me the most accurate plot possible. Analyzing the scene time frames is also very important to understand pacing. "
+                          "Respond with plain prose only.\n"
                           + json.dumps(outline, ensure_ascii=False, separators=(',', ':'))),
                 config=genai.types.GenerateContentConfig(temperature=0.3)
             )
