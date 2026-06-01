@@ -11,6 +11,7 @@ class SpeechProcessRequest(BaseModel):
     video_id: str
     video_path: str
     scene_metadata_path: str
+    language: str = "te-IN"  # Default to Telugu, Sarvam format
 
 @router.post("/process-speech")
 async def process_speech(request: SpeechProcessRequest):
@@ -26,7 +27,7 @@ async def process_speech(request: SpeechProcessRequest):
         processor = SpeechProcessor(output_base_dir=output_dir)
         
         # Trigger the global dialogue extraction and diarization
-        results = processor.process_speech(request.video_id, request.video_path)
+        results = processor.process_speech(request.video_id, request.video_path, language=request.language)
         logger.info(f"Successfully processed speech for {request.video_id}")
         
         return {

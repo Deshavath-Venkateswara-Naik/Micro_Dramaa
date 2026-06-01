@@ -376,7 +376,7 @@ class GeminiLLMProcessor:
         
         # Read the 4 required JSON files
         shots_path = video_dir / "shots.json"
-        energy_path = video_dir / "standardized_video_audio_energy.json"
+        energy_path = video_dir / "full_audio_intelligence.json"
         diarization_path = video_dir / "dialogue_diarization.json"
         clip_embeddings_path = video_dir / "clip_embeddings.json"
         

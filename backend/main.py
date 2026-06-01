@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routers import ingestion, segmentation, audio, speech, face, emotion, bgm, fusion, sequencer, renderer, story, clip, gemini_llm
+from routers import ingestion, segmentation, audio, speech, face, emotion, bgm, fusion, sequencer, renderer, story, clip, gemini_llm, microdrama
 import uvicorn
 import os
 import logging
@@ -37,6 +37,7 @@ app.include_router(renderer.router, prefix="/api/v1")
 app.include_router(story.router, prefix="/api/v1")
 app.include_router(clip.router, prefix="/api/v1")
 app.include_router(gemini_llm.router, prefix="/api/v1")
+app.include_router(microdrama.router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():

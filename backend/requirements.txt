@@ -26,3 +26,5 @@ moviepy==1.0.3
 transformers
 
 tf-keras
+
+hypothesis==6.155.1

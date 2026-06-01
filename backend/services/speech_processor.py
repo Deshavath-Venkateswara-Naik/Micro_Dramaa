@@ -21,7 +21,7 @@ class SpeechProcessor:
         self.speech_dir = self.output_base_dir / "speech"
         self.speech_dir.mkdir(parents=True, exist_ok=True)
         
-    def _transcribe_single_with_sarvam_api(self, audio_path: str, save_name: str = "chunk") -> dict:
+    def _transcribe_single_with_sarvam_api(self, audio_path: str, save_name: str = "chunk", language: str = "te-IN") -> dict:
         """Sends audio directly to Sarvam AI STT and returns the transcript."""
         sarvam_api_key = os.environ.get("SARVAM_API_KEY")
         if not sarvam_api_key:
@@ -30,7 +30,7 @@ class SpeechProcessor:
             
         url = "https://api.sarvam.ai/speech-to-text"
         headers = {"api-subscription-key": sarvam_api_key}
-        data = {"language_code": "te-IN"}
+        data = {"language_code": language}
         
         max_retries = 5
         for attempt in range(max_retries):
@@ -90,7 +90,7 @@ class SpeechProcessor:
         chunks = sorted(list(chunk_dir.glob("chunk_*.wav")))
         return [str(c) for c in chunks]
 
-    def transcribe_with_sarvam_api(self, audio_path: str, shot_id: str) -> dict:
+    def transcribe_with_sarvam_api(self, audio_path: str, shot_id: str, language: str = "te-IN") -> dict:
         """Transcribe audio strictly using sequential 29s chunks via Sarvam REST API."""
         final_json_path = self.output_base_dir / "audio" / "chunks" / f"{shot_id}_final_merged.json"
         
@@ -116,7 +116,7 @@ class SpeechProcessor:
         logger.info(f"Processing {len(chunks)} chunks (30s each) sequentially via Sarvam AI.")
         for i, chunk_path in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}: {chunk_path}")
-            stt = self._transcribe_single_with_sarvam_api(chunk_path, f"{shot_id}_part{i}")
+            stt = self._transcribe_single_with_sarvam_api(chunk_path, f"{shot_id}_part{i}", language)
             
             chunk_text = stt.get("transcript", "")
             
@@ -153,7 +153,7 @@ class SpeechProcessor:
         logger.info(f"Saved merged Sarvam API results to {final_json_path}")
         return final_result
 
-    def _transcribe_with_whisperx(self, audio_path: str) -> dict:
+    def _transcribe_with_whisperx(self, audio_path: str, language: str = "te-IN") -> dict:
         """Local fallback for word-level transcription using WhisperX."""
         try:
             import whisperx
@@ -166,8 +166,9 @@ class SpeechProcessor:
             
             # Transcribe
             audio = whisperx.load_audio(audio_path)
-            # Use Telugu language if possible, otherwise it will auto-detect
-            result = model.transcribe(audio, batch_size=8, language="te")
+            # Use requested language if possible (extract first two chars for Whisper, e.g. "te" from "te-IN")
+            whisper_lang = language[:2] if language else "te"
+            result = model.transcribe(audio, batch_size=8, language=whisper_lang)
             
             # Align
             model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
@@ -192,12 +193,12 @@ class SpeechProcessor:
             logger.error(f"Local WhisperX transcription failed: {e}")
             return {"transcript": "", "segments": []}
 
-    def transcribe_audio_with_fallback(self, audio_path: str, shot_id: str) -> dict:
+    def transcribe_audio_with_fallback(self, audio_path: str, shot_id: str, language: str = "te-IN") -> dict:
         """Attempts transcription with Sarvam API, falls back to local WhisperX if it fails."""
-        results = self.transcribe_with_sarvam_api(audio_path, shot_id)
+        results = self.transcribe_with_sarvam_api(audio_path, shot_id, language)
         if not results or not results.get("segments"):
             logger.warning(f"Sarvam API failed for {shot_id}. Falling back to local WhisperX transcription...")
-            results = self._transcribe_with_whisperx(audio_path)
+            results = self._transcribe_with_whisperx(audio_path, language)
         else:
             # Align Sarvam chunk segments using WhisperX to get word-level timestamps
             logger.info("Aligning Sarvam chunk transcripts to get word-level timestamps using WhisperX...")
@@ -206,7 +207,8 @@ class SpeechProcessor:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 audio_array = whisperx.load_audio(audio_path)
-                model_a, metadata = whisperx.load_align_model(language_code="te", device=device)
+                whisper_lang = language[:2] if language else "te"
+                model_a, metadata = whisperx.load_align_model(language_code=whisper_lang, device=device)
                 align_result = whisperx.align(results["segments"], model_a, metadata, audio_array, device, return_char_alignments=False)
                 
                 formatted_words = []
@@ -224,7 +226,7 @@ class SpeechProcessor:
                 
         return results
 
-    def process_speech(self, video_id: str, video_path: str = None) -> dict:
+    def process_speech(self, video_id: str, video_path: str = None, language: str = "te-IN") -> dict:
         """End-to-End Stage 4 Pipeline: Global Dialogue Extraction & Diarization."""
         dialogue_dir = self.output_base_dir / "audio" / "dialogue"
         dialogue_dir.mkdir(parents=True, exist_ok=True)
@@ -283,9 +285,9 @@ class SpeechProcessor:
                 logger.error(f"Demucs extraction failed: {e}")
                 global_dialogue_path = full_audio_path
                 
-        # 2. Transcribe with Subtitle API (with local fallback)
-        logger.info(f"Transcribing global dialogue: {global_dialogue_path}")
-        stt_results = self.transcribe_audio_with_fallback(str(global_dialogue_path), f"{video_id}_global")
+        # 2. Transcribe with Sarvam AI REST API (with local WhisperX fallback)
+        logger.info(f"Transcribing global dialogue with Sarvam AI: {global_dialogue_path}")
+        stt_results = self.transcribe_audio_with_fallback(str(global_dialogue_path), f"{video_id}_global", language)
         
         words = stt_results.get("segments", [])
         if not words:
