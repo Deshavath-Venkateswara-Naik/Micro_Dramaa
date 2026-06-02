@@ -2,6 +2,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services.microdrama_generator import MicrodramaGenerator
+from services.microdrama_generator2 import MicrodramaGenerator2
 from services.microdrama_renderer import MicrodramaRenderer
 
 router = APIRouter()
@@ -24,6 +25,31 @@ async def generate_microdrama(request: MicrodramaRequest):
 
         generator = MicrodramaGenerator(output_base_dir=storage_path)
         result = generator.generate(video_id=request.video_id, language=request.language)
+
+        if result.get("status") == "failed":
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-microdrama2", tags=["Microdrama Generator"])
+async def generate_microdrama2(request: MicrodramaRequest):
+    """
+    Second pass: Fixes microdramas that are > 120s by splitting them.
+    Overrides the JSON file as requested.
+    """
+    try:
+        storage_path = os.path.join(os.path.dirname(__file__), "..", "..", "storage", request.video_id)
+        if not os.path.exists(storage_path):
+            raise HTTPException(status_code=404, detail=f"Storage directory not found for video {request.video_id}")
+
+        generator = MicrodramaGenerator2(output_base_dir=storage_path)
+        result = generator.generate(video_id=request.video_id)
 
         if result.get("status") == "failed":
             raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
