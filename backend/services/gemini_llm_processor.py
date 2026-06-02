@@ -359,10 +359,18 @@ class GeminiLLMProcessor:
         try:
             resp = self.llm_client.models.generate_content(
                 model="gemini-2.5-flash-lite",
-                contents=("Write a highly detailed and accurate plot summary of this film based on its "
-                          "ordered scene outline. CRITICAL INSTRUCTION: The overall plot of the movie is extremely important! "
-                          "Give me the most accurate plot possible. Analyzing the scene time frames is also very important to understand pacing. "
-                          "Respond with plain prose only.\n"
+                contents=("Write a highly detailed, dramatic, and structured plot summary of this film based on the "
+                          "ordered scene outline provided. \n\n"
+                          "CRITICAL INSTRUCTION: The plot of the movie is very important. Based on this plot, we are generating micro-dramas. "
+                          "Therefore, you MUST provide the plot clearly, focusing entirely on the main movie or serial storyline. "
+                          "You MUST explicitly ignore and filter out any unnecessary scenes, advertisements, title cards, and credits. "
+                          "Your summary must highlight the narrative structure and emotional peaks. Format your response with the following sections:\n\n"
+                          "1. CORE NARRATIVE ARC: The overarching story from beginning to end, clearly outlining the main plot without any filler.\n"
+                          "2. MAJOR DRAMATIC BEATS: Bullet points of the most intense conflicts, betrayals, revelations, or emotional peaks.\n"
+                          "3. CHARACTER DYNAMICS: Key relationships, motivations, and emotional stakes for the main characters.\n"
+                          "4. PEAK MICRODRAMA ZONES: Identify specific scenes or sequences (e.g., 'Scenes 12-15') that have the highest potential for suspenseful, viral, or emotionally gripping microdramas.\n\n"
+                          "Analyzing the scene time frames is very important to understand pacing. "
+                          "Respond with clearly formatted markdown.\n\n"
                           + json.dumps(outline, ensure_ascii=False, separators=(',', ':'))),
                 config=genai.types.GenerateContentConfig(temperature=0.3)
             )

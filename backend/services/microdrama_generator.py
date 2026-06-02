@@ -22,8 +22,10 @@ class MicrodramaGenerator:
             f"retention strategist working on a long-form {language} film. "
             "Your goal is to extract the top highly engaging, fast-paced microdrama candidates "
             "strictly between 30 and 120 seconds across the movie. THIS IS THE TOP MOST RULE.\n\n"
-            "CRITICAL: Ignore all boring parts, mundane conversations, low-energy scenes, and absolutely EXCLUDE any advertisements, sponsor integrations, title cards, or end credits. "
-            "Only pick peak drama moments, intense conflicts, major revelations, or highly emotional scenes. "
+            "CRITICAL: The plot of the movie is extremely important! Every single microdrama you generate MUST be directly and heavily related to the core narrative plot of the movie.\n"
+            "You MUST base your extraction on the provided Scenes timing, Plot of the movie, and Transcription with speaker diarization.\n"
+            "You MUST absolutely EXCLUDE any advertisements, sponsor integrations, title cards, end credits, and unnecessary or boring scenes. "
+            "Only pick peak drama moments, intense conflicts, major revelations, or highly emotional scenes that are central to the plot. "
             "Respond with ONLY a valid, parseable JSON object."
         )
 
@@ -90,7 +92,7 @@ Below is the overarching movie plot, the scene data, and diarized dialogue for a
 </context>
 
 <movie_plot>
-{plot_content}
+{plot_content}e
 </movie_plot>
 
 <movie_scenes>
@@ -102,17 +104,17 @@ Below is the overarching movie plot, the scene data, and diarized dialogue for a
 </movie_dialogue>
 
 <instructions>
-Your task is to read the provided movie plot very carefully, and then extract a sequential series of highly engaging microdrama 'episodes' that together tell the COMPLETE story of the movie from start to finish. Focus heavily on the plot to identify and select the most high-engaged, impactful parts of the story, and aggressively ignore all boring parts. The combination of all microdramas MUST be able to tell the whole story plot.
+Your task is to carefully read the provided movie plot, scene timings, and transcription with speaker diarization. The plot of the movie is extremely important. Based on these three elements, extract a sequential series of highly engaging microdrama 'episodes' that together tell the COMPLETE story of the movie from start to finish. Focus heavily on the plot to identify and select only the important parts of the movie or serial. You MUST aggressively filter out any advertisements and unnecessary scenes. The combination of all microdramas MUST be able to tell the whole story plot clearly.
 
 <rules>
-  <rule_1>COMPLETE PLOT COVERAGE: You MUST carefully read the overall plot of the movie. Pick a overarching microdrama story that captures the entire movie's plot. The combination of all your selected microdramas must seamlessly tell this whole story in sync, from beginning to end, with clear cut boundaries between episodes.</rule_1>
+  <rule_1>COMPLETE PLOT COVERAGE & RELEVANCE: You MUST carefully read the overall plot of the movie. Pick an overarching microdrama story that captures the entire movie's plot. Every single generated microdrama episode MUST be directly and heavily related to this core plot. Do not select random side-scenes or disconnected engaging moments if they do not advance the main plot. The combination of all your selected microdramas must seamlessly tell the whole main story in sync, from beginning to end, with clear cut boundaries between episodes.</rule_1>
   <rule_2>STRICT DURATION (TOP MOST RULE): Every single episode MUST be strictly between 30.0 and 120.0 seconds inclusive. This is non-negotiable.
     <requirement>You MUST use the supplied `duration_seconds` fields provided in the input data to calculate the exact length of your episodes.</requirement>
     <requirement>Only select episodes where 30 <= total duration_seconds <= 120.</requirement>
     <warning>If a dramatic sequence or scene is longer than 120 seconds, you MUST split it into two or more separate, consecutive episodes (e.g., 'Episode 4: Part 1' and 'Episode 5: Part 2') to ensure NO episode exceeds the 120-second limit.</warning>
   </rule_2>
   <rule_3>REMOVE UNNECESSARY SCENES: You MUST explain the whole story with these microdramas WITHOUT unnecessary scenes, but WITH engaging scenes. Aggressively ignore and cut out all boring dialogue, slow pacing, mundane moments, silence, and ANY form of advertisement, brand promotion, or sponsor message.</rule_3>
-  <rule_4>BOUNDARY GROUNDING & SYNC: Select every episode's `start_time` and `end_time` ONLY from the actual timestamps provided. You must provide a plot explanation for each microdrama, and these must be in sync with the overall plot story you provide.</rule_4>
+  <rule_4>CLEAN CUTS & BOUNDARY GROUNDING: DO NOT cut videos abruptly mid-sentence or mid-action. You must ensure that the `start_time` and `end_time` represent natural scene boundaries, clean dialogue pauses, or resolved emotional beats. Select these timestamps ONLY from the actual timestamps provided in the data. You must also provide a plot explanation for each microdrama, and these must be in sync with the overall plot story you provide.</rule_4>
   <rule_5>CHRONOLOGICAL SEQUENCE: Order the episodes chronologically by their start_time to form a coherent sequence of episodes.</rule_5>
 </rules>
 

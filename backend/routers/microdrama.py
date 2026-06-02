@@ -8,7 +8,7 @@ router = APIRouter()
 
 class MicrodramaRequest(BaseModel):
     video_id: str
-    language: str = "Telugu"
+    language: str = "Hindi"
 
 @router.post("/generate-microdrama", tags=["Microdrama Generator"])
 async def generate_microdrama(request: MicrodramaRequest):

@@ -21,7 +21,7 @@ class SpeechProcessor:
         self.speech_dir = self.output_base_dir / "speech"
         self.speech_dir.mkdir(parents=True, exist_ok=True)
         
-    def _transcribe_single_with_sarvam_api(self, audio_path: str, save_name: str = "chunk", language: str = "te-IN") -> dict:
+    def _transcribe_single_with_sarvam_api(self, audio_path: str, save_name: str = "chunk", language: str = "hi-IN") -> dict:
         """Sends audio directly to Sarvam AI STT and returns the transcript."""
         sarvam_api_key = os.environ.get("SARVAM_API_KEY")
         if not sarvam_api_key:
@@ -90,7 +90,7 @@ class SpeechProcessor:
         chunks = sorted(list(chunk_dir.glob("chunk_*.wav")))
         return [str(c) for c in chunks]
 
-    def transcribe_with_sarvam_api(self, audio_path: str, shot_id: str, language: str = "te-IN") -> dict:
+    def transcribe_with_sarvam_api(self, audio_path: str, shot_id: str, language: str = "hi-IN") -> dict:
         """Transcribe audio strictly using sequential 29s chunks via Sarvam REST API."""
         final_json_path = self.output_base_dir / "audio" / "chunks" / f"{shot_id}_final_merged.json"
         
@@ -153,7 +153,7 @@ class SpeechProcessor:
         logger.info(f"Saved merged Sarvam API results to {final_json_path}")
         return final_result
 
-    def _transcribe_with_whisperx(self, audio_path: str, language: str = "te-IN") -> dict:
+    def _transcribe_with_whisperx(self, audio_path: str, language: str = "hi-IN") -> dict:
         """Local fallback for word-level transcription using WhisperX."""
         try:
             import whisperx
@@ -166,8 +166,8 @@ class SpeechProcessor:
             
             # Transcribe
             audio = whisperx.load_audio(audio_path)
-            # Use requested language if possible (extract first two chars for Whisper, e.g. "te" from "te-IN")
-            whisper_lang = language[:2] if language else "te"
+            # Use requested language if possible (extract first two chars for Whisper, e.g. "hi" from "hi-IN")
+            whisper_lang = language[:2] if language else "hi"
             result = model.transcribe(audio, batch_size=8, language=whisper_lang)
             
             # Align
@@ -193,7 +193,7 @@ class SpeechProcessor:
             logger.error(f"Local WhisperX transcription failed: {e}")
             return {"transcript": "", "segments": []}
 
-    def transcribe_audio_with_fallback(self, audio_path: str, shot_id: str, language: str = "te-IN") -> dict:
+    def transcribe_audio_with_fallback(self, audio_path: str, shot_id: str, language: str = "hi-IN") -> dict:
         """Attempts transcription with Sarvam API, falls back to local WhisperX if it fails."""
         results = self.transcribe_with_sarvam_api(audio_path, shot_id, language)
         if not results or not results.get("segments"):
@@ -207,7 +207,7 @@ class SpeechProcessor:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 audio_array = whisperx.load_audio(audio_path)
-                whisper_lang = language[:2] if language else "te"
+                whisper_lang = language[:2] if language else "hi"
                 model_a, metadata = whisperx.load_align_model(language_code=whisper_lang, device=device)
                 align_result = whisperx.align(results["segments"], model_a, metadata, audio_array, device, return_char_alignments=False)
                 
@@ -226,7 +226,7 @@ class SpeechProcessor:
                 
         return results
 
-    def process_speech(self, video_id: str, video_path: str = None, language: str = "te-IN") -> dict:
+    def process_speech(self, video_id: str, video_path: str = None, language: str = "hi-IN") -> dict:
         """End-to-End Stage 4 Pipeline: Global Dialogue Extraction & Diarization."""
         dialogue_dir = self.output_base_dir / "audio" / "dialogue"
         dialogue_dir.mkdir(parents=True, exist_ok=True)

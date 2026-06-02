@@ -27,7 +27,7 @@ def run_diarization(audio_path, transcript_path, output_path):
     
     # 3. Align chunks to get word-level timestamps
     logger.info("Aligning chunked transcript to get word-level timestamps...")
-    model_a, metadata = whisperx.load_align_model(language_code="te", device=device)
+    model_a, metadata = whisperx.load_align_model(language_code="hi", device=device)
     align_result = whisperx.align(segments, model_a, metadata, audio_array, device, return_char_alignments=False)
     
     words = []
