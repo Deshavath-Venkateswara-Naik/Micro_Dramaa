@@ -23,7 +23,7 @@ class MicrodramaGenerator:
             "Your goal is to extract the top highly engaging, fast-paced microdrama candidates "
             "strictly between 30 and 120 seconds across the movie. THIS IS THE TOP MOST RULE.\n\n"
             "CRITICAL: The plot of the movie is extremely important! Every single microdrama you generate MUST be directly and heavily related to the core narrative plot of the movie.\n"
-            "You MUST base your extraction on the provided Scenes timing, Plot of the movie, and Transcription with speaker diarization.\n"
+            "You MUST base your extraction on the provided Scenes timing, Plot of the movie, and the Cinematic Script Transcript (which includes speaker diarization, emotions, and sound events).\n"
             "You MUST absolutely EXCLUDE any advertisements, sponsor integrations, title cards, end credits, and unnecessary or boring scenes. "
             "Only pick peak drama moments, intense conflicts, major revelations, or highly emotional scenes that are central to the plot. "
             "Respond with ONLY a valid, parseable JSON object."
@@ -49,9 +49,13 @@ class MicrodramaGenerator:
             return {"video_id": video_id, "status": "failed", "error": "LLM client not initialized"}
 
         scenes_path = self.output_base_dir / "scenes_and_plot.json"
-        dialogue_path = self.output_base_dir / "dialogue_diarization.json"
+        script_path = self.output_base_dir / "script_transcript.json"
+        
+        # Fallback to older diarization file if the new cinematic script is missing
+        if not script_path.exists():
+            script_path = self.output_base_dir / "dialogue_diarization.json"
 
-        if not scenes_path.exists() or not dialogue_path.exists():
+        if not scenes_path.exists() or not script_path.exists():
             return {"video_id": video_id, "status": "failed", "error": "Missing input JSON files"}
 
         def calculate_duration_from_str(start_str, end_str):
@@ -74,48 +78,85 @@ class MicrodramaGenerator:
                 s["duration_seconds"] = calculate_duration_from_str(s.get("start_time", "00:00:00"), s.get("end_time", "00:00:00"))
             scenes_content = json.dumps(scenes_list, indent=2, ensure_ascii=False)
             
-        with open(dialogue_path, "r", encoding="utf-8") as f:
-            dialogue_json = json.load(f)
-            dialogue_list = dialogue_json.get("dialogues", []) if isinstance(dialogue_json, dict) else dialogue_json
+        with open(script_path, "r", encoding="utf-8") as f:
+            script_json = json.load(f)
+            
+            # Handle both new script_transcript.json format and old dialogue_diarization.json format
+            if isinstance(script_json, dict) and ("dialogues" in script_json or "sound_events" in script_json):
+                dialogue_list = script_json.get("dialogues", [])
+                sound_events = script_json.get("sound_events", [])
+            else:
+                dialogue_list = script_json.get("dialogues", []) if isinstance(script_json, dict) else script_json
+                sound_events = []
+                
             for d in dialogue_list:
                 try:
                     # dialogue start/end are often already floats in seconds
                     d["duration_seconds"] = round(float(d.get("end", 0.0)) - float(d.get("start", 0.0)), 3)
                 except:
                     d["duration_seconds"] = 0.0
-            dialogue_content = json.dumps(dialogue_json, indent=2, ensure_ascii=False)
+                    
+            script_content = json.dumps({
+                "dialogues": dialogue_list,
+                "sound_events": sound_events
+            }, indent=2, ensure_ascii=False)
+
+        # Load explicit dialogue diarization file as requested by the user
+        diarization_path = self.output_base_dir / "dialogue_diarization copy.json"
+        if not diarization_path.exists():
+            diarization_path = self.output_base_dir / "dialogue_diarization.json"
+        
+        diarization_content = "No dialogue diarization file found."
+        if diarization_path.exists():
+            with open(diarization_path, "r", encoding="utf-8") as f:
+                diarization_content = json.dumps(json.load(f), indent=2, ensure_ascii=False)
 
         prompt = f"""
 <context>
 You are an elite OTT microdrama editor and retention strategist.
-Below is the overarching movie plot, the scene data, and diarized dialogue for a {language} movie.
+Below is the overarching movie plot, the scene data, the cinematic script transcript, AND the raw dialogue diarization for a {language} movie.
 </context>
 
 <movie_plot>
-{plot_content}e
+{plot_content}
 </movie_plot>
 
 <movie_scenes>
 {scenes_content}
 </movie_scenes>
 
-<movie_dialogue>
-{dialogue_content}
-</movie_dialogue>
+<movie_script_transcript>
+{script_content}
+</movie_script_transcript>
+
+<movie_dialogue_diarization>
+{diarization_content}
+</movie_dialogue_diarization>
 
 <instructions>
-Your task is to carefully read the provided movie plot, scene timings, and transcription with speaker diarization. The plot of the movie is extremely important. Based on these three elements, extract a sequential series of highly engaging microdrama 'episodes' that together tell the COMPLETE story of the movie from start to finish. Focus heavily on the plot to identify and select only the important parts of the movie or serial. You MUST aggressively filter out any advertisements and unnecessary scenes. The combination of all microdramas MUST be able to tell the whole story plot clearly.
+Your task is to extract a sequential series of highly engaging microdrama 'episodes' that together tell the COMPLETE story of the movie from start to finish. 
+You are receiving a massive amount of multimodal data. You MUST understand the purpose of each data source and use them together:
+
+1. <movie_plot>: This is your NARRATIVE COMPASS. It tells you the core story. Every episode you create MUST drive this plot forward. Ignore any scenes that do not contribute to this plot.
+2. <movie_scenes>: This is your STRUCTURAL MAP. It summarizes the movie scene-by-scene, showing characters, settings, and emotions. Use this to quickly locate the dramatic peaks, fights, and emotional resolutions without getting lost in the raw text.
+3. <movie_script_transcript> & <movie_dialogue_diarization>: These are your PRECISION SCALPELS. They contain the exact millisecond timestamps of every spoken word, the speaker's emotion, and background sound events (like Music or Sirens). Use these to find the EXACT start and end boundaries for your episodes so that no dialogue is cut off mid-sentence.
+
+Methodology: 
+Step 1: Read the plot to know the story.
+Step 2: Look at the scenes to find the chunks of time that tell that story.
+Step 3: Dive into the transcript/diarization for those specific times to set your exact episode 'start_time' and 'end_time' to the millisecond.
+</instructions>
 
 <rules>
-  <rule_1>COMPLETE PLOT COVERAGE & RELEVANCE: You MUST carefully read the overall plot of the movie. Pick an overarching microdrama story that captures the entire movie's plot. Every single generated microdrama episode MUST be directly and heavily related to this core plot. Do not select random side-scenes or disconnected engaging moments if they do not advance the main plot. The combination of all your selected microdramas must seamlessly tell the whole main story in sync, from beginning to end, with clear cut boundaries between episodes.</rule_1>
+  <rule_1>COMPLETE PLOT COVERAGE & RELEVANCE: You MUST capture the entire movie's plot. Every single generated episode MUST be directly related to the core plot. Do not select random side-scenes or disconnected engaging moments if they do not advance the main plot. The combination of all your selected microdramas must seamlessly tell the whole main story in sync, from beginning to end.</rule_1>
   <rule_2>STRICT DURATION (TOP MOST RULE): Every single episode MUST be strictly between 30.0 and 120.0 seconds inclusive. This is non-negotiable.
     <requirement>You MUST use the supplied `duration_seconds` fields provided in the input data to calculate the exact length of your episodes.</requirement>
     <requirement>Only select episodes where 30 <= total duration_seconds <= 120.</requirement>
     <warning>If a dramatic sequence or scene is longer than 120 seconds, you MUST split it into two or more separate, consecutive episodes (e.g., 'Episode 4: Part 1' and 'Episode 5: Part 2') to ensure NO episode exceeds the 120-second limit.</warning>
   </rule_2>
-  <rule_3>REMOVE UNNECESSARY SCENES: You MUST explain the whole story with these microdramas WITHOUT unnecessary scenes, but WITH engaging scenes. Aggressively ignore and cut out all boring dialogue, slow pacing, mundane moments, silence, and ANY form of advertisement, brand promotion, or sponsor message.</rule_3>
-  <rule_4>CLEAN CUTS & BOUNDARY GROUNDING: DO NOT cut videos abruptly mid-sentence or mid-action. You must ensure that the `start_time` and `end_time` represent natural scene boundaries, clean dialogue pauses, or resolved emotional beats. Select these timestamps ONLY from the actual timestamps provided in the data. You must also provide a plot explanation for each microdrama, and these must be in sync with the overall plot story you provide.</rule_4>
-  <rule_5>CHRONOLOGICAL SEQUENCE: Order the episodes chronologically by their start_time to form a coherent sequence of episodes.</rule_5>
+  <rule_3>REMOVE UNNECESSARY SCENES: Aggressively ignore and cut out all boring dialogue, slow pacing, mundane moments, silence, and ANY form of advertisement, brand promotion, or sponsor message. The output must be purely cinematic story.</rule_3>
+  <rule_4>CLEAN CUTS & BOUNDARY GROUNDING: DO NOT cut videos abruptly mid-sentence or mid-action. You must ensure that the `start_time` and `end_time` align EXACTLY with the timestamps of actual spoken dialogue or sound events found in the <movie_script_transcript> or <movie_dialogue_diarization>. Do not hallucinate timestamps.</rule_4>
+  <rule_5>CHRONOLOGICAL SEQUENCE: Order the episodes chronologically by their start_time.</rule_5>
 </rules>
 
 <output_format>
@@ -188,6 +229,25 @@ Respond with ONLY a valid, parseable JSON object. The object MUST match this sch
                 duration = end_sec - start_sec
                 
                 c["duration_seconds"] = round(duration, 3)
+                
+                # Inject precise dialogues and sound events for this episode's timeframe
+                episode_dialogues = []
+                for d in dialogue_list:
+                    d_start = float(d.get("start", 0.0))
+                    d_end = float(d.get("end", 0.0))
+                    # Overlap condition: dialogue ends after episode starts, and starts before episode ends
+                    if d_end > start_sec and d_start < end_sec:
+                        episode_dialogues.append(d)
+                c["dialogues"] = episode_dialogues
+                
+                episode_sound_events = []
+                for se in sound_events:
+                    se_start = float(se.get("start", 0.0))
+                    se_end = float(se.get("end", 0.0))
+                    if se_end > start_sec and se_start < end_sec:
+                        episode_sound_events.append(se)
+                c["sound_events"] = episode_sound_events
+                
                 final_candidates.append(c)
             except Exception as e:
                 logger.warning(f"Failed to parse time for candidate {c.get('title')}: {e}")

@@ -6,6 +6,11 @@ import requests
 import time
 from dotenv import load_dotenv
 
+try:
+    from services.script_formatter import CinematicScriptFormatter
+except ImportError:
+    pass
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -232,9 +237,9 @@ class SpeechProcessor:
         dialogue_dir.mkdir(parents=True, exist_ok=True)
         global_dialogue_path = dialogue_dir / "global_dialogue.wav"
         
+        full_audio_path = self.output_base_dir / "audio" / "full_audio.wav"
         # If the clean vocals track already exists, skip audio extraction and demucs entirely
         if not global_dialogue_path.exists():
-            full_audio_path = self.output_base_dir / "audio" / "full_audio.wav"
             if not full_audio_path.exists():
                 if video_path and Path(video_path).exists():
                     logger.info(f"Extracting full audio from {video_path} to {full_audio_path}")
@@ -364,6 +369,17 @@ class SpeechProcessor:
                 json.dump(result_json, f, indent=2, ensure_ascii=False)
                 
             logger.info(f"Successfully saved diarization to {out_path}")
+            
+            # Formatter Step
+            try:
+                formatter = CinematicScriptFormatter(str(self.output_base_dir))
+                fmt_res = formatter.process(str(out_path), str(full_audio_path))
+                if fmt_res.get("status") == "success":
+                    result_json["script_txt"] = fmt_res.get("script_txt")
+                    result_json["script_json"] = fmt_res.get("script_json")
+            except Exception as e:
+                logger.error(f"Script formatting failed: {e}")
+                
             return result_json
             
         except ImportError:

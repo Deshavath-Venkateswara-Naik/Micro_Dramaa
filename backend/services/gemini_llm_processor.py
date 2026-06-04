@@ -193,7 +193,7 @@ class GeminiLLMProcessor:
     MAX_SCENE_SECONDS = 180.0    # safety cap: a scene this long must split at any visual cut
 
     def _merge_shots_into_scenes(self, shots, visual_signals, energy_summary,
-                                 dialogue_alignment, diarization) -> list:
+                                 dialogue_alignment, diarization, sound_events) -> list:
         """
         DETERMINISTIC scene grouping (no LLM, no cost, no truncation).
 
@@ -282,15 +282,51 @@ class GeminiLLMProcessor:
         for i, sc in enumerate(merged):
             lines = [d for d in dialogues
                      if d.get("start", -1) < sc["end"] and d.get("end", 0) > sc["start"]]
-            excerpt = " ".join(d.get("text", "") for d in lines).strip()
+            
+            # Format dialogue with emotions if available
+            formatted_lines = []
+            scene_emotions = []
+            for d in lines:
+                text = d.get("text", "")
+                emotion = d.get("emotion", "neutral")
+                speaker = d.get("speaker", "UNKNOWN")
+                if emotion and emotion != "neutral":
+                    formatted_lines.append(f"{speaker} ({emotion}): {text}")
+                    # Track emotion for the scene
+                    scene_emotions.append({"speaker": speaker, "emotion": emotion})
+                else:
+                    formatted_lines.append(text)
+            
+            # Keep unique speaker+emotion combos
+            unique_emotions = []
+            seen_combos = set()
+            for e in scene_emotions:
+                combo = (e["speaker"], e["emotion"])
+                if combo not in seen_combos:
+                    seen_combos.add(combo)
+                    unique_emotions.append(e)
+            
+            excerpt = " | ".join(formatted_lines).strip()
             if len(excerpt) > 600:
                 excerpt = excerpt[:600] + "..."
+                
+            # Extract sound events that fall into this scene
+            scene_events = [e.get("label") for e in sound_events 
+                            if e.get("start", -1) < sc["end"] and e.get("end", 0) > sc["start"]]
+            # Keep unique events ordered
+            unique_events = []
+            for e in scene_events:
+                if e not in unique_events:
+                    unique_events.append(e)
+                    
             result.append({
                 "scene_number": i + 1,
                 "start_time": fmt(sc["start"]),
                 "end_time": fmt(sc["end"]),
                 "included_shot_ids": sc["shot_ids"],
                 "characters_present": sorted(sc["speakers"]),
+                "speaker_emotions": unique_emotions,
+                "sound_events": unique_events,
                 "dialogue_excerpt": excerpt
             })
         return result
@@ -386,17 +422,30 @@ class GeminiLLMProcessor:
             
         video_dir = self.output_base_dir
         
-        # Read the 4 required JSON files
+        # Read the required JSON files
         shots_path = video_dir / "shots.json"
         energy_path = video_dir / "full_audio_intelligence.json"
-        diarization_path = video_dir / "dialogue_diarization.json"
         clip_embeddings_path = video_dir / "clip_embeddings.json"
+        script_transcript_path = video_dir / "script_transcript.json"
         
         shots_data = self._read_json(shots_path)
         energy_data = self._read_json(energy_path)
-        diarization_data = self._read_json(diarization_path)
         clip_embeddings = self._read_json(clip_embeddings_path)
-
+        
+        # Always read sound_events from sound_events.json since the API writes there now
+        sed_data = self._read_json(video_dir / "sound_events.json")
+        sound_events = sed_data.get("sound_events", [])
+        
+        # Load script_transcript for dialogue with emotions
+        script_data = self._read_json(script_transcript_path)
+        if script_data:
+            diarization_data = {"dialogues": script_data.get("dialogues", [])}
+            # Fallback if sound_events.json was missing but script_transcript had them
+            if not sound_events:
+                sound_events = script_data.get("sound_events", [])
+        else:
+            # Fallback if script_transcript hasn't been generated yet
+            diarization_data = self._read_json(video_dir / "dialogue_diarization.json")
         # --- DERIVED SIGNALS (the accuracy upgrade) ---
         # Instead of discarding the CLIP embeddings, convert them into adjacent
         # visual-similarity scores. Instead of dumping raw per-second energy,
@@ -415,7 +464,7 @@ class GeminiLLMProcessor:
         # cannot truncate or explode into "one scene per shot".
         scenes = self._merge_shots_into_scenes(
             shots_data, visual_signals, energy_summary,
-            dialogue_alignment, diarization_data
+            dialogue_alignment, diarization_data, sound_events
         )
         logger.info(f"[{video_id}] Deterministic merge produced {len(scenes)} candidate scenes "
                     f"from {len(visual_signals)} shots.")
