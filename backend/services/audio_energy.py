@@ -25,7 +25,7 @@ def analyze_audio_energy(video_id: str, video_path: str, output_dir: str) -> str
     audio_dir.mkdir(parents=True, exist_ok=True)
     
     full_audio_wav = audio_dir / "full_audio.wav"
-    output_json_path = audio_dir / "full_audio_intelligence.json"
+    output_json_path = output_dir / "full_audio_intelligence.json"
     
     # 1. Extract Audio using FFmpeg
     if not full_audio_wav.exists():

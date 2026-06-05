@@ -78,15 +78,30 @@ class SpeechProcessor:
                     result_json = result_res.json()
                     
                     # Flatten segments into a list of word objects for diarization
+                    def time_to_seconds(t_str: str) -> float:
+                        try:
+                            h, m, s = t_str.split(':')
+                            return int(h) * 3600 + int(m) * 60 + float(s)
+                        except Exception:
+                            return 0.0
+
                     words = []
-                    for segment in result_json.get("segments", []):
-                        for word in segment.get("words", []):
-                            if "start" in word and "end" in word:
-                                words.append({
-                                    "word": word.get("word", word.get("text", "")),
-                                    "start": word["start"],
-                                    "end": word["end"]
-                                })
+                    if "sub_text" in result_json:
+                        for item in result_json["sub_text"]:
+                            words.append({
+                                "word": item.get("text", ""),
+                                "start": time_to_seconds(item.get("start_time", "00:00:00.000")),
+                                "end": time_to_seconds(item.get("end_time", "00:00:00.000"))
+                            })
+                    else:
+                        for segment in result_json.get("segments", []):
+                            for word in segment.get("words", []):
+                                if "start" in word and "end" in word:
+                                    words.append({
+                                        "word": word.get("word", word.get("text", "")),
+                                        "start": float(word["start"]),
+                                        "end": float(word["end"])
+                                    })
                                 
                     return {"transcript": result_json.get("text", ""), "segments": words}
                 elif status == "Failed":
