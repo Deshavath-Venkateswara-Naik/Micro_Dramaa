@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routers import ingestion, segmentation, audio, speech, face, clip, gemini_llm, microdrama
+from routers import ingestion, segmentation, audio, speech, clip, gemini_llm, microdrama
 import uvicorn
 import os
 import logging
@@ -28,7 +28,6 @@ app.include_router(ingestion.router, prefix="/api/v1")
 app.include_router(segmentation.router, prefix="/api/v1")
 app.include_router(audio.router, prefix="/api/v1")
 app.include_router(speech.router, prefix="/api/v1")
-app.include_router(face.router, prefix="/api/v1")
 app.include_router(clip.router, prefix="/api/v1")
 app.include_router(gemini_llm.router, prefix="/api/v1")
 app.include_router(microdrama.router, prefix="/api/v1")

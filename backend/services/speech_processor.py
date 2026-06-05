@@ -139,8 +139,13 @@ class SpeechProcessor:
             global_dialogue_path = full_audio_path
                 
         # 2. Transcribe with Subtitle API
-        # Using PUBLIC_SERVER_URL to expose the local full_audio.wav to the external Subtitle API
-        media_url = f"{PUBLIC_SERVER_URL}/storage/{video_id}/audio/full_audio.wav"
+        source_url_path = self.output_base_dir / "source_url.txt"
+        if not source_url_path.exists():
+            logger.error(f"source_url.txt not found in {self.output_base_dir}")
+            return {"dialogues": []}
+            
+        with open(source_url_path, "r") as f:
+            media_url = f.read().strip()
             
         logger.info(f"Transcribing via Subtitle API with URL: {media_url}")
         stt_results = self._transcribe_with_subtitle_api(media_url, language)
