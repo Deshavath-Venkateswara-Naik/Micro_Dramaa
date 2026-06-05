@@ -29,3 +29,4 @@ torchlibrosa
 tf-keras
 
 hypothesis==6.155.1
+yt-dlp

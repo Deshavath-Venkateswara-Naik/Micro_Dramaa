@@ -26,210 +26,82 @@ class SpeechProcessor:
         self.speech_dir = self.output_base_dir / "speech"
         self.speech_dir.mkdir(parents=True, exist_ok=True)
         
-    def _transcribe_single_with_sarvam_api(self, audio_path: str, save_name: str = "chunk", language: str = "hi-IN") -> dict:
-        """Sends audio directly to Sarvam AI STT and returns the transcript."""
-        sarvam_api_key = os.environ.get("SARVAM_API_KEY")
-        if not sarvam_api_key:
-            logger.error("SARVAM_API_KEY not found in .env")
-            return {"transcript": "", "segments": []}
-            
-        url = "https://api.sarvam.ai/speech-to-text"
-        headers = {"api-subscription-key": sarvam_api_key}
-        data = {"language_code": language}
+    def _transcribe_with_subtitle_api(self, media_url: str, language: str) -> dict:
+        """Sends job to Subtitle API, polls for completion, and returns transcript segments."""
+        import requests
+        import time
         
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                with open(audio_path, 'rb') as f:
-                    files = {"file": (os.path.basename(audio_path), f, "audio/wav")}
-                    res = requests.post(url, headers=headers, data=data, files=files, timeout=60)
-                    
-                if res.status_code == 200:
-                    result_data = res.json()
-                    
-                    # Save chunk JSON
-                    chunk_json_path = self.output_base_dir / "audio" / "chunks" / f"{save_name}.json"
-                    chunk_json_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(chunk_json_path, 'w', encoding='utf-8') as f:
-                        json.dump(result_data, f, ensure_ascii=False, indent=2)
-                        
-                    transcript = result_data.get("transcript", "")
-                    return {"transcript": transcript.strip(), "segments": []}
-                elif res.status_code == 429:
-                    wait_time = (attempt + 1) * 5
-                    logger.warning(f"Rate limited by Sarvam API. Retrying in {wait_time}s (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(f"Sarvam API error: {res.status_code} - {res.text}")
-                    return {"transcript": "", "segments": []}
-                    
-            except Exception as e:
-                logger.error(f"Failed to call Sarvam API: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2)
-                    continue
-                return {"transcript": "", "segments": []}
-        return {"transcript": "", "segments": []}
-
-    def _split_audio_with_ffmpeg(self, audio_path: str, segment_duration: int = 300) -> list:
-        chunk_dir = self.output_base_dir / "audio" / "chunks"
-        chunk_dir.mkdir(parents=True, exist_ok=True)
+        # Subtitle API expects a 2-char language code, e.g., "hi" instead of "hi-IN"
+        lang_code = language[:2] if language else "hi"
         
-        # Clear existing chunks
-        for f in chunk_dir.glob("chunk_*.wav"):
-            f.unlink()
-            
-        import subprocess
-        logger.info(f"Splitting {audio_path} into {segment_duration}s chunks...")
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", audio_path,
-            "-f", "segment",
-            "-segment_time", str(segment_duration),
-            "-c", "copy",
-            str(chunk_dir / "chunk_%03d.wav")
-        ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        chunks = sorted(list(chunk_dir.glob("chunk_*.wav")))
-        return [str(c) for c in chunks]
-
-    def transcribe_with_sarvam_api(self, audio_path: str, shot_id: str, language: str = "hi-IN") -> dict:
-        """Transcribe audio strictly using sequential 29s chunks via Sarvam REST API."""
-        final_json_path = self.output_base_dir / "audio" / "chunks" / f"{shot_id}_final_merged.json"
-        
-        # Avoid redundant STT chunking if we already successfully processed this audio
-        if final_json_path.exists():
-            logger.info(f"Found existing merged STT results at {final_json_path}. Skipping Sarvam API calls.")
-            try:
-                with open(final_json_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                logger.warning("Failed to decode existing final_merged.json, running STT again...")
-
-        segment_duration = 29 # 29 seconds to strictly avoid the 30-second duration limit on Sarvam
-        try:
-            chunks = self._split_audio_with_ffmpeg(audio_path, segment_duration)
-        except Exception as e:
-            logger.error(f"Failed to split audio: {e}")
-            return {"transcript": "", "segments": []}
-            
-        all_segments = []
-        full_transcript = []
-        
-        logger.info(f"Processing {len(chunks)} chunks (30s each) sequentially via Sarvam AI.")
-        for i, chunk_path in enumerate(chunks):
-            logger.info(f"Processing chunk {i+1}/{len(chunks)}: {chunk_path}")
-            stt = self._transcribe_single_with_sarvam_api(chunk_path, f"{shot_id}_part{i}", language)
-            
-            chunk_text = stt.get("transcript", "")
-            
-            if not chunk_text:
-                logger.warning(f"Chunk {i+1} returned empty transcription. Continuing to next chunk.")
-            else:
-                # Offset timestamps: we create a single block segment for this chunk
-                offset = i * segment_duration
-                # We do not have word-level timestamps from Sarvam API, so we provide chunk boundaries
-                # which WhisperX can use to align later.
-                segment_obj = {
-                    "start": float(offset),
-                    "end": float(offset + segment_duration),
-                    "text": chunk_text
-                }
-                all_segments.append(segment_obj)
-                full_transcript.append(chunk_text)
-                
-            # To avoid hitting strict rate limits on Sarvam (approx 10 requests/minute)
-            time.sleep(6)
-                
-        if not full_transcript:
-            logger.error("All chunks failed to return transcription from Sarvam API.")
-            return {"transcript": "", "segments": []}
-            
-        final_result = {
-            "transcript": " ".join(full_transcript),
-            "segments": all_segments
+        url = f"{SUBTITLE_API_BASE_URL}/jobs"
+        payload = {
+            "url": media_url,
+            "language": lang_code,
+            "word_timestamps": True
         }
         
-        with open(final_json_path, 'w', encoding='utf-8') as f:
-            json.dump(final_result, f, ensure_ascii=False, indent=2)
-            
-        logger.info(f"Saved merged Sarvam API results to {final_json_path}")
-        return final_result
-
-    def _transcribe_with_whisperx(self, audio_path: str, language: str = "hi-IN") -> dict:
-        """Local fallback for word-level transcription using WhisperX."""
         try:
-            import whisperx
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Using local WhisperX for transcription on {device}")
+            logger.info(f"Submitting job to Subtitle API for URL: {media_url}")
+            res = requests.post(url, json=payload, timeout=30)
+            res.raise_for_status()
+            job_data = res.json()
+            job_id = job_data.get("job_id")
             
-            # Load model
-            model = whisperx.load_model("large-v2", device, compute_type="float16" if device == "cuda" else "int8")
+            if not job_id:
+                logger.error("No job_id returned from Subtitle API.")
+                return {"transcript": "", "segments": []}
+                
+            logger.info(f"Job {job_id} submitted successfully. Polling for completion...")
             
-            # Transcribe
-            audio = whisperx.load_audio(audio_path)
-            # Use requested language if possible (extract first two chars for Whisper, e.g. "hi" from "hi-IN")
-            whisper_lang = language[:2] if language else "hi"
-            result = model.transcribe(audio, batch_size=8, language=whisper_lang)
+            # Poll for completion
+            poll_interval_seconds = 5
+            timeout_minutes = 10
+            max_poll_attempts = 120 # 120 * 5s = 10 minutes
             
-            # Align
-            model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
-            result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
-            
-            words = []
-            for segment in result["segments"]:
-                for word in segment.get("words", []):
-                    if "start" in word and "end" in word:
-                        words.append({
-                            "word": word["word"],
-                            "start": word["start"],
-                            "end": word["end"]
-                        })
-            
-            full_text = " ".join([w["word"] for w in words])
-            return {"transcript": full_text.strip(), "segments": words}
-        except ImportError:
-            logger.error("whisperx is not installed. Cannot use local fallback.")
+            for attempt in range(max_poll_attempts):
+                poll_url = f"{url}/{job_id}"
+                poll_res = requests.get(poll_url, timeout=30)
+                poll_res.raise_for_status()
+                poll_data = poll_res.json()
+                status = poll_data.get("status")
+                
+                if status == "Completed":
+                    result_url = poll_data.get("result_url")
+                    if not result_url:
+                        logger.error("Job completed but no result_url provided.")
+                        return {"transcript": "", "segments": []}
+                        
+                    logger.info(f"Job completed! Fetching results from {result_url}")
+                    result_res = requests.get(result_url, timeout=30)
+                    result_res.raise_for_status()
+                    result_json = result_res.json()
+                    
+                    # Flatten segments into a list of word objects for diarization
+                    words = []
+                    for segment in result_json.get("segments", []):
+                        for word in segment.get("words", []):
+                            if "start" in word and "end" in word:
+                                words.append({
+                                    "word": word.get("word", word.get("text", "")),
+                                    "start": word["start"],
+                                    "end": word["end"]
+                                })
+                                
+                    return {"transcript": result_json.get("text", ""), "segments": words}
+                elif status == "Failed":
+                    error_msg = poll_data.get("error", "Unknown error")
+                    logger.error(f"Subtitle API job failed: {error_msg}")
+                    return {"transcript": "", "segments": []}
+                    
+                time.sleep(poll_interval_seconds)
+                
+            logger.error("Subtitle API job timed out.")
             return {"transcript": "", "segments": []}
+            
         except Exception as e:
-            logger.error(f"Local WhisperX transcription failed: {e}")
+            logger.error(f"Failed to process with Subtitle API: {e}")
             return {"transcript": "", "segments": []}
-
-    def transcribe_audio_with_fallback(self, audio_path: str, shot_id: str, language: str = "hi-IN") -> dict:
-        """Attempts transcription with Sarvam API, falls back to local WhisperX if it fails."""
-        results = self.transcribe_with_sarvam_api(audio_path, shot_id, language)
-        if not results or not results.get("segments"):
-            logger.warning(f"Sarvam API failed for {shot_id}. Falling back to local WhisperX transcription...")
-            results = self._transcribe_with_whisperx(audio_path, language)
-        else:
-            # Align Sarvam chunk segments using WhisperX to get word-level timestamps
-            logger.info("Aligning Sarvam chunk transcripts to get word-level timestamps using WhisperX...")
-            try:
-                import whisperx
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                audio_array = whisperx.load_audio(audio_path)
-                whisper_lang = language[:2] if language else "hi"
-                model_a, metadata = whisperx.load_align_model(language_code=whisper_lang, device=device)
-                align_result = whisperx.align(results["segments"], model_a, metadata, audio_array, device, return_char_alignments=False)
-                
-                formatted_words = []
-                for segment in align_result["segments"]:
-                    for word in segment.get("words", []):
-                        if "start" in word and "end" in word:
-                            formatted_words.append({
-                                "word": word["word"],
-                                "start": word["start"],
-                                "end": word["end"]
-                            })
-                results["segments"] = formatted_words
-            except Exception as e:
-                logger.error(f"WhisperX alignment failed on Sarvam results: {e}. Diarization may be inaccurate.")
-                
-        return results
 
     def process_speech(self, video_id: str, video_path: str = None, language: str = "hi-IN") -> dict:
         """End-to-End Stage 4 Pipeline: Global Dialogue Extraction & Diarization."""
@@ -263,36 +135,21 @@ class SpeechProcessor:
                     logger.error(f"Cannot proceed: {global_dialogue_path} not found, {full_audio_path} not found, and no valid video_path provided.")
                     return {"dialogues": []}
                 
-            # 1. Run Demucs to get the clean vocals (dialogue.wav)
-            logger.info("Running Demucs to extract global dialogue track...")
-            import subprocess
-            try:
-                # Output to a temporary demucs folder, then move vocals.wav
-                tmp_demucs = self.output_base_dir / "audio" / "demucs_tmp"
-                cmd = [
-                    "demucs",
-                    "--two-stems", "vocals",
-                    "-n", "htdemucs",
-                    "--out", str(tmp_demucs),
-                    str(full_audio_path)
-                ]
-                subprocess.run(cmd, check=True)
+            # Skip Demucs extraction as requested, use full audio for diarization
+            global_dialogue_path = full_audio_path
                 
-                # Demucs outputs to: tmp_demucs/htdemucs/full_audio/vocals.wav
-                extracted_vocals = tmp_demucs / "htdemucs" / "full_audio" / "vocals.wav"
-                if extracted_vocals.exists():
-                    subprocess.run(["mv", str(extracted_vocals), str(global_dialogue_path)])
-                else:
-                    logger.error("Demucs failed to output vocals.wav")
-                    # Fallback to full audio if extraction failed
-                    global_dialogue_path = full_audio_path
-            except Exception as e:
-                logger.error(f"Demucs extraction failed: {e}")
-                global_dialogue_path = full_audio_path
-                
-        # 2. Transcribe with Sarvam AI REST API (with local WhisperX fallback)
-        logger.info(f"Transcribing global dialogue with Sarvam AI: {global_dialogue_path}")
-        stt_results = self.transcribe_audio_with_fallback(str(global_dialogue_path), f"{video_id}_global", language)
+        # 2. Transcribe with Subtitle API
+        # Using PUBLIC_SERVER_URL to expose the local full_audio.wav to the external Subtitle API
+        media_url = f"{PUBLIC_SERVER_URL}/storage/{video_id}/audio/full_audio.wav"
+            
+        logger.info(f"Transcribing via Subtitle API with URL: {media_url}")
+        stt_results = self._transcribe_with_subtitle_api(media_url, language)
+        
+        # Save results locally for debugging
+        final_json_path = self.output_base_dir / "audio" / "chunks" / f"{video_id}_final_merged.json"
+        final_json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(final_json_path, 'w', encoding='utf-8') as f:
+            json.dump(stt_results, f, ensure_ascii=False, indent=2)
         
         words = stt_results.get("segments", [])
         if not words:
