@@ -15,17 +15,17 @@ Micro-Drama is a comprehensive, multi-stage AI-driven cinematic intelligence pip
 * **Automated Rendering**: Outputs accurately titled, perfectly cropped cinematic reels (vertical 9:16 format) using ffmpeg/MoviePy.
 
 ## Pipeline Stages
-The backend operates through a structured sequence of API-driven stages:
+The backend operates through a structured sequence of API-driven stages, which can be fully automated using the `run_pipeline.py` orchestration script:
 
-1. **Ingestion (`/api/v1/ingest`)**: Standardize and prepare video assets.
-2. **Segmentation (`/api/v1/segment`)**: Cinematic boundary detection (visual cuts and audio pauses).
-3. **Audio Processing (`/api/v1/process-audio`)**: Stem isolation and audio energy calculation.
-4. **Speech Intelligence (`/api/v1/process-speech`)**: High-accuracy STT, speaker diarization, and hallucination filtering.
-5. **Face Intelligence (`/api/v1/process-faces`)**: Frame-by-frame deep face and emotion analysis.
-6. **CLIP Embeddings (`/api/v1/process-clip-embeddings`)**: Visual semantic extraction.
-7. **Story & Scene Analysis (`/api/v1/gemini-llm`)**: Generates structured narrative scenes and comprehensive plot mapping using Gemini.
-8. **Microdrama Generation (`/api/v1/generate-microdrama`)**: Proposes a chronological list of plot-driven episodes.
-9. **Duration Enforcement (`/api/v1/generate-microdrama2`)**: Automatically validates and splits episodes exceeding the 120s limit.
+1. **Ingestion (`/api/v1/ingest/url`)**: Downloads and standardizes the video.
+2. **Segmentation (`/api/v1/segment`)**: Cinematic boundary detection (visual cuts).
+3. **Audio Processing (`/api/v1/process-audio`)**: Global audio energy and volume peak calculation.
+4. **Sound Events (`/api/v1/extract-sound-events`)**: Detects cinematic background noises (e.g., door slams, gunshots).
+5. **CLIP Embeddings (`/api/v1/process-clip-embeddings`)**: Visual semantic extraction for cut continuity.
+6. **Speech Intelligence (`/api/v1/process-speech`)**: Global STT, speaker diarization, and LLM-driven emotion mapping.
+7. **Data Fusion & Plotting (`/api/v1/gemini-llm`)**: Fuses multimodal signals to segment logical narrative scenes and writes the movie plot.
+8. **Microdrama Generation (`/api/v1/generate-microdrama`)**: Proposes a chronological list of plot-driven episodes under 100 seconds.
+9. **Duration Enforcement (`/api/v1/generate-microdrama2`)**: Automatically validates and splits any proposed episodes exceeding the 120s limit.
 10. **Renderer (`/api/v1/render-microdrama`)**: Final physical reel generation.
 
 ## Documentation
@@ -33,44 +33,44 @@ For complete details on all backend endpoints, request payloads, and schema stru
 
 ## Technology Stack
 * **Backend**: FastAPI (Python)
-* **AI Models**: Gemini LLM (Vertex AI SDK), Sarvam AI STT, HTDemucs, InsightFace, HSEmotion, CLIP
-* **Video Processing**: MoviePy, FFmpeg
-* **Data Handling**: JSON-driven metadata storage (`scenes_and_plot.json`, `dialogue_diarization.json`, etc.)
+* **AI Models**: Gemini 2.5 Flash/Flash-Lite, Sarvam AI STT, YAMNet (Sound Events), CLIP
+* **Video Processing**: PySceneDetect, FFmpeg
+* **Data Handling**: JSON-driven metadata storage (`shots.json`, `scenes_and_plot.json`, `script_transcript.json`, etc.)
 
 ---
 
 ## Detailed Phase Breakdown
 
-### Phase 1: Preparation & Foundation
-**1. Ingestion API (`/ingest`)**
-Accepts a raw video upload, generates a unique video ID, extracts basic metadata, and standardizes the video format (H.264, AAC, 1080p, 30fps) so the AI models have a clean asset to work with.
+### Phase 1: Ingestion & Baseline
+**1. Ingestion API (`/api/v1/ingest/url`)**
+Accepts a raw video URL (e.g., YouTube), generates a unique video ID, extracts basic metadata, and standardizes the video format (H.264, AAC, 1080p, 30fps) so the AI models have a clean asset to work with.
 
-**2. Segmentation API (`/segment`)**
-Runs the cinematic segmentation pipeline on the standardized video. It detects visual cuts and audio pauses to slice the movie into logical cinematic "scenes" rather than random chunks.
+**2. Segmentation API (`/api/v1/segment`)**
+Runs PySceneDetect over the standardized video to detect camera cuts and outputs the exact timestamps of every shot into `shots.json`. This provides the baseline timeline for all future mapping.
 
-### Phase 2: Multimodal Feature Extraction
-**3. Audio Processing API (`/process-audio`)**
-Takes the video and isolates the different audio layers. It extracts the raw audio, denoises it, separates it into distinct stems (dialogue track, background music track) using HTDemucs, and computes quantitative volume metrics.
+### Phase 2: Parallel Feature Extraction
+**3. Audio Processing API (`/api/v1/process-audio`)**
+Analyzes the global audio track to calculate volume peaks, silences, and energy profiles, outputting to `full_audio_intelligence.json`.
 
-**4. Speech Intelligence API (`/process-speech`)**
-Takes the isolated dialogue track and transcribes it into text (optimized for Telugu via Sarvam AI). It performs robust speaker diarization and includes specialized filtering logic to eliminate "hallucinated" English advertising text from the transcripts.
+**4. Sound Events API (`/api/v1/extract-sound-events`)**
+Uses YAMNet to detect background noises (door slams, gunshots, laughter) in the global audio track, outputting to `sound_events.json`. This gives context to non-verbal storytelling.
 
-**5. Face Intelligence API (`/process-faces`)**
-Analyzes video frames to detect faces, calculates if the frame is a "close-up", and extracts facial expressions to build an emotional timeline for the scene using InsightFace and HSEmotion.
+**5. CLIP Embeddings API (`/api/v1/process-clip-embeddings`)**
+Extracts middle frames from every shot and runs them through the CLIP model to generate semantic vectors (`clip_embeddings.json`). This tells the system how visually different two consecutive shots are (e.g., a hard location change vs. a reverse angle).
 
-**6. CLIP Embeddings API (`/process-clip-embeddings`)**
-Extracts mid-frames from cinematic shots and calculates CLIP semantic embeddings to understand the visual content and context.
+**6. Speech Intelligence API (`/api/v1/process-speech`)**
+Sends the full audio to Sarvam AI for highly accurate transcription and diarization. It then asks an LLM to assign an emotion to each line of dialogue, outputting a screenplay-like `script_transcript.json`.
 
-### Phase 3: AI Scoring & Narrative Generation
-**7. Gemini LLM Intelligence API (`/gemini-llm`)**
-The "brain" of the operation. It aggregates multimodal data—specifically shot timestamps, audio energy, diarized transcripts, and visual semantic markers—and leverages Gemini to generate a structured JSON output of narrative scenes and a comprehensive movie plot.
+### Phase 3: The "Brain" (Data Fusion)
+**7. Gemini LLM Intelligence API (`/api/v1/gemini-llm`)**
+The core fusion engine. It aggregates `shots.json`, `clip_embeddings.json`, `full_audio_intelligence.json`, `sound_events.json`, and `script_transcript.json`. It deterministically merges shots into scenes, asks Gemini to label them, and leverages Gemini to write a comprehensive movie plot based solely on the extracted metadata (`scenes_and_plot.json`).
 
-**8. Microdrama Generation API (`/generate-microdrama`)**
-Consumes the `scenes_and_plot.json` and `dialogue_diarization.json` to extract a comprehensive set of narrative-rich clips. It shifts from selecting sparse highlights to generating a thorough, chronological list of all essential plot points, explicitly excluding side-content.
+### Phase 4: Assembly & Rendering
+**8. Microdrama Generation API (`/api/v1/generate-microdrama`)**
+Consumes the generated scenes and plot. The LLM selects highly dramatic, viral sequences that are between 30 to 100 seconds long, outputting to `microdrama_candidates.json`.
 
-**9. Duration Enforcement API (`/generate-microdrama2`)**
-A programmatic enforcement mechanism that recalculates episode durations, automatically splits any candidates exceeding 120 seconds into appropriately sized chunks, and filters out clips shorter than 25 seconds to ensure compliance with the target 30-120 second duration rule.
+**9. Duration Enforcement API (`/api/v1/generate-microdrama2`)**
+A programmatic safety pass. It scans the candidate micro-dramas and enforces the strict 120-second limit. If the LLM accidentally proposed a clip that is mathematically too long, this script automatically splits it into appropriately sized chunks.
 
-### Phase 4: Final Assembly
-**10. Renderer API (`/render-microdrama`)**
-The final physical step. It consumes the validated candidate episodes, resolves any invisible video processing defects, crops the video horizontally into a vertical 9:16 aspect ratio, and exports the final, titled cinematic reels.
+**10. Renderer API (`/api/v1/render-microdrama`)**
+The final physical step. It consumes the validated candidate episodes and uses FFmpeg to physically cut the original MP4 into the final, ready-to-post vertical micro-drama clips, saving them into the video's render folder.
